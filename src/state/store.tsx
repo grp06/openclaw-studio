@@ -13,9 +13,12 @@ import {
 
 import type { Project, ProjectTile, ProjectsStore } from "../lib/projects/types";
 import {
+  createProjectTile as apiCreateProjectTile,
   createProject as apiCreateProject,
+  deleteProjectTile as apiDeleteProjectTile,
   deleteProject as apiDeleteProject,
   fetchProjectsStore,
+  renameProjectTile as apiRenameProjectTile,
   saveProjectsStore,
 } from "../lib/projects/client";
 
@@ -32,9 +35,10 @@ export type AgentTile = ProjectTile & {
   runId: string | null;
   streamText: string | null;
   draft: string;
+  sessionSettingsSynced: boolean;
 };
 
-export type ProjectRuntime = Project & {
+export type ProjectRuntime = Omit<Project, "tiles"> & {
   tiles: AgentTile[];
 };
 
@@ -77,12 +81,11 @@ const initialState: CanvasState = {
   error: null,
 };
 
-const buildSessionKey = (projectId: string, tileId: string) =>
-  `agent:main:proj-${projectId}-${tileId}`;
+const buildSessionKey = (agentId: string) => `agent:${agentId}:main`;
 
-const createRuntimeTile = (projectId: string, tile: ProjectTile): AgentTile => ({
+const createRuntimeTile = (tile: ProjectTile): AgentTile => ({
   ...tile,
-  sessionKey: tile.sessionKey || buildSessionKey(projectId, tile.id),
+  sessionKey: tile.sessionKey || buildSessionKey(tile.agentId),
   model: tile.model ?? "zai/glm-4.7",
   thinkingLevel: tile.thinkingLevel ?? "low",
   status: "idle",
@@ -92,17 +95,16 @@ const createRuntimeTile = (projectId: string, tile: ProjectTile): AgentTile => (
   runId: null,
   streamText: null,
   draft: "",
+  sessionSettingsSynced: false,
 });
 
 const hydrateProject = (project: Project): ProjectRuntime => ({
   ...project,
-  tiles: Array.isArray(project.tiles)
-    ? project.tiles.map((tile) => createRuntimeTile(project.id, tile))
-    : [],
+  tiles: Array.isArray(project.tiles) ? project.tiles.map(createRuntimeTile) : [],
 });
 
 const dehydrateStore = (state: CanvasState): ProjectsStore => ({
-  version: 1,
+  version: 2,
   activeProjectId: state.activeProjectId,
   projects: state.projects.map((project) => ({
     id: project.id,
@@ -113,6 +115,8 @@ const dehydrateStore = (state: CanvasState): ProjectsStore => ({
     tiles: project.tiles.map((tile) => ({
       id: tile.id,
       name: tile.name,
+      agentId: tile.agentId,
+      role: tile.role,
       sessionKey: tile.sessionKey,
       model: tile.model ?? null,
       thinkingLevel: tile.thinkingLevel ?? null,
@@ -242,10 +246,23 @@ const reducer = (state: CanvasState, action: Action): CanvasState => {
 type StoreContextValue = {
   state: CanvasState;
   dispatch: React.Dispatch<Action>;
-  createTile: (projectId: string) => AgentTile;
+  createTile: (
+    projectId: string,
+    name: string,
+    role: ProjectTile["role"]
+  ) => Promise<{ tile: ProjectTile; warnings: string[] } | null>;
   refreshStore: () => Promise<void>;
-  createProject: (name: string, repoPath: string) => Promise<{ warnings: string[] } | null>;
-  deleteProject: (projectId: string) => Promise<void>;
+  createProject: (name: string) => Promise<{ warnings: string[] } | null>;
+  deleteProject: (projectId: string) => Promise<{ warnings: string[] } | null>;
+  deleteTile: (
+    projectId: string,
+    tileId: string
+  ) => Promise<{ warnings: string[] } | null>;
+  renameTile: (
+    projectId: string,
+    tileId: string,
+    name: string
+  ) => Promise<{ warnings: string[] } | { error: string } | null>;
 };
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -285,22 +302,24 @@ export const AgentCanvasProvider = ({ children }: { children: ReactNode }) => {
     }, 250);
   }, [state]);
 
-  const createTile = useCallback((projectId: string) => {
-    const id = crypto.randomUUID();
-    return createRuntimeTile(projectId, {
-      id,
-      name: `Agent ${id.slice(0, 4)}`,
-      sessionKey: buildSessionKey(projectId, id),
-      model: null,
-      thinkingLevel: null,
-      position: { x: 80, y: 80 },
-      size: { width: 360, height: 280 },
-    });
-  }, []);
+  const createTile = useCallback(
+    async (projectId: string, name: string, role: ProjectTile["role"]) => {
+      try {
+        const result = await apiCreateProjectTile(projectId, { name, role });
+        dispatch({ type: "loadStore", store: result.store });
+        return { tile: result.tile, warnings: result.warnings };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to create tile.";
+        dispatch({ type: "setError", error: message });
+        return null;
+      }
+    },
+    [dispatch]
+  );
 
-  const createProject = useCallback(async (name: string, repoPath: string) => {
+  const createProject = useCallback(async (name: string) => {
     try {
-      const result = await apiCreateProject({ name, repoPath });
+      const result = await apiCreateProject({ name });
       dispatch({ type: "loadStore", store: result.store });
       return { warnings: result.warnings };
     } catch (err) {
@@ -312,13 +331,42 @@ export const AgentCanvasProvider = ({ children }: { children: ReactNode }) => {
 
   const deleteProject = useCallback(async (projectId: string) => {
     try {
-      const store = await apiDeleteProject(projectId);
-      dispatch({ type: "loadStore", store });
+      const result = await apiDeleteProject(projectId);
+      dispatch({ type: "loadStore", store: result.store });
+      return { warnings: result.warnings };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete project.";
       dispatch({ type: "setError", error: message });
+      return null;
     }
   }, []);
+
+  const deleteTile = useCallback(async (projectId: string, tileId: string) => {
+    try {
+      const result = await apiDeleteProjectTile(projectId, tileId);
+      dispatch({ type: "loadStore", store: result.store });
+      return { warnings: result.warnings };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to delete tile.";
+      dispatch({ type: "setError", error: message });
+      return null;
+    }
+  }, []);
+
+  const renameTile = useCallback(
+    async (projectId: string, tileId: string, name: string) => {
+      try {
+        const result = await apiRenameProjectTile(projectId, tileId, { name });
+        dispatch({ type: "loadStore", store: result.store });
+        return { warnings: result.warnings };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to rename tile.";
+        dispatch({ type: "setError", error: message });
+        return { error: message };
+      }
+    },
+    [dispatch]
+  );
 
   const value = useMemo<StoreContextValue>(() => {
     return {
@@ -328,8 +376,10 @@ export const AgentCanvasProvider = ({ children }: { children: ReactNode }) => {
       refreshStore,
       createProject,
       deleteProject,
+      deleteTile,
+      renameTile,
     };
-  }, [state, createTile, refreshStore, createProject, deleteProject]);
+  }, [state, createTile, refreshStore, createProject, deleteProject, deleteTile, renameTile]);
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 };

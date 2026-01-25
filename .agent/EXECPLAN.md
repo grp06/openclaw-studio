@@ -23,11 +23,11 @@ You can see it working by:
 ## Progress
 
 - [x] (2026-01-25 18:30Z) Read `.agent/PLANS.md` and audited current app structure (projects store, tiles, gateway client).
-- [ ] Implement project creation side effects (mkdir `~/slug`, `git init`, write `.gitignore`) and update the UI flow to no longer require entering a repo path.
-- [ ] Implement per-tile agent IDs (true multi-agent session keys) with a store schema migration from `ProjectsStore.version=1` to `version=2`.
-- [ ] Add server-side tile creation endpoint that creates the per-tile Clawdbot workspace scaffolding and copies auth profiles from the default agent when possible (without overwriting).
-- [ ] Wire UI tile creation/deletion to the new endpoints (avoid relying on client-only state for side effects).
-- [ ] Validate end-to-end: create project, create two tiles, send messages, and verify separate session transcript folders; run `npm run lint` and `npm run build`.
+- [x] (2026-01-25 18:55Z) Implemented project creation side effects (slugify, mkdir, `git init`, `.gitignore`) and updated the UI to accept only a project name.
+- [x] (2026-01-25 18:55Z) Implemented per-tile `agentId`/`role` storage with a v1→v2 store migration and v2 session key derivation.
+- [x] (2026-01-25 19:31Z) Added server-side tile creation endpoint with workspace bootstrap + auth profile copy and optional tile deletion endpoint.
+- [x] (2026-01-25 19:31Z) Wired UI tile creation/deletion to server endpoints and updated client API helpers.
+- [ ] (2026-01-25 19:38Z) Validate end-to-end (completed: `npm run lint`, `npm run build`; remaining: manual project/tile creation + gateway transcript verification).
 
 ## Surprises & Discoveries
 
@@ -42,6 +42,10 @@ You can see it working by:
 
 - Decision: Never delete project folders or agent directories from disk as part of “delete” actions.
   Rationale: Directory deletion is destructive and explicitly discouraged by the repo’s agent guidelines; the UI should only remove entries from its own store and leave cleanup as a separate, explicit operation.
+  Date/Author: 2026-01-25 / Codex
+
+- Decision: Generate client-side tile `agentId`s as `proj-<projectId>-<tileIdPrefix>` until server-side tile provisioning lands.
+  Rationale: The UI still creates tiles locally during Milestone 2; this keeps per-tile session keys unique without blocking on the new tile endpoint.
   Date/Author: 2026-01-25 / Codex
 
 ## Outcomes & Retrospective
@@ -367,3 +371,5 @@ For the Git helper, explicitly specify required operations:
 Plan change notes:
 
 - (2026-01-25 18:30Z) Initial ExecPlan drafted based on current code audit.
+- (2026-01-25 18:55Z) Updated progress and decision log after implementing Milestones 1–2 changes in code.
+- (2026-01-25 19:31Z) Implemented Milestones 3–4 code paths and marked progress accordingly.

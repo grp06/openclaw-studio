@@ -12,7 +12,7 @@ type CanvasViewportProps = {
   onMoveTile: (id: string, position: TilePosition) => void;
   onResizeTile: (id: string, size: TileSize) => void;
   onDeleteTile: (id: string) => void;
-  onRenameTile: (id: string, name: string) => void;
+  onRenameTile: (id: string, name: string) => Promise<boolean>;
   onDraftChange: (id: string, value: string) => void;
   onSend: (id: string, sessionKey: string, message: string) => void;
   onModelChange: (id: string, sessionKey: string, value: string | null) => void;
@@ -95,7 +95,7 @@ export const CanvasViewport = ({
       <div className="absolute inset-0" style={scaledStyle}>
         {tiles.map((tile) => (
           <AgentTileComponent
-            key={tile.id}
+            key={`${tile.id}-${tile.name}`}
             tile={tile}
             zoom={transform.zoom}
             isSelected={tile.id === selectedTileId}

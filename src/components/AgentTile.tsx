@@ -1,6 +1,7 @@
 import type React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useState } from "react";
 import type { AgentTile as AgentTileType, TilePosition, TileSize } from "../state/store";
 
 const MIN_SIZE = { width: 280, height: 220 };
@@ -19,7 +20,7 @@ type AgentTileProps = {
   onMove: (position: TilePosition) => void;
   onResize: (size: TileSize) => void;
   onDelete: () => void;
-  onNameChange: (name: string) => void;
+  onNameChange: (name: string) => Promise<boolean>;
   onDraftChange: (value: string) => void;
   onSend: (message: string) => void;
   onModelChange: (value: string | null) => void;
@@ -41,6 +42,8 @@ export const AgentTile = ({
   onModelChange,
   onThinkingChange,
 }: AgentTileProps) => {
+  const [nameDraft, setNameDraft] = useState(tile.name);
+
   const handleDragStart = (event: React.PointerEvent<HTMLDivElement>) => {
     event.stopPropagation();
     onSelect();
@@ -63,6 +66,21 @@ export const AgentTile = ({
 
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", handleUp);
+  };
+
+  const commitName = async () => {
+    const next = nameDraft.trim();
+    if (!next) {
+      setNameDraft(tile.name);
+      return;
+    }
+    if (next === tile.name) {
+      return;
+    }
+    const ok = await onNameChange(next);
+    if (!ok) {
+      setNameDraft(tile.name);
+    }
   };
 
   const handleResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -116,8 +134,20 @@ export const AgentTile = ({
       >
         <input
           className="w-full bg-transparent text-sm font-semibold text-slate-900 outline-none"
-          value={tile.name}
-          onChange={(event) => onNameChange(event.target.value)}
+          value={nameDraft}
+          onChange={(event) => setNameDraft(event.target.value)}
+          onBlur={() => {
+            void commitName();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.currentTarget.blur();
+            }
+            if (event.key === "Escape") {
+              setNameDraft(tile.name);
+              event.currentTarget.blur();
+            }
+          }}
         />
         <span
           className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${statusColor}`}
@@ -208,7 +238,19 @@ export const AgentTile = ({
         </div>
       </div>
       <div
-        className="absolute bottom-0 right-0 h-16 w-16 cursor-se-resize"
+        className="absolute bottom-0 right-0 h-4 w-4 cursor-se-resize"
+        onPointerDown={handleResizeStart}
+      />
+      <div
+        className="absolute bottom-0 left-0 h-4 w-4 cursor-sw-resize"
+        onPointerDown={handleResizeStart}
+      />
+      <div
+        className="absolute top-0 right-0 h-4 w-4 cursor-ne-resize"
+        onPointerDown={handleResizeStart}
+      />
+      <div
+        className="absolute top-0 left-0 h-4 w-4 cursor-nw-resize"
         onPointerDown={handleResizeStart}
       />
     </div>

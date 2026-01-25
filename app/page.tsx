@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CanvasViewport } from "../src/components/CanvasViewport";
 import { HeaderBar } from "../src/components/HeaderBar";
 import { extractText } from "../src/lib/text/extractText";
@@ -11,6 +11,7 @@ import {
   getActiveProject,
   useAgentCanvasStore,
 } from "../src/state/store";
+import { createProjectDiscordChannel } from "../src/lib/projects/client";
 import type { ProjectRuntime } from "../src/state/store";
 
 type ChatEventPayload = {
@@ -19,6 +20,36 @@ type ChatEventPayload = {
   state: "delta" | "final" | "aborted" | "error";
   message?: unknown;
   errorMessage?: string;
+};
+
+type SessionPreviewItem = {
+  role: "user" | "assistant" | "tool" | "system" | "other";
+  text: string;
+};
+
+type SessionsPreviewEntry = {
+  key: string;
+  status: "ok" | "empty" | "missing" | "error";
+  items: SessionPreviewItem[];
+};
+
+type SessionsPreviewResult = {
+  ts: number;
+  previews: SessionsPreviewEntry[];
+};
+
+const buildPreviewLines = (items: SessionPreviewItem[]) => {
+  const lines: string[] = [];
+  for (const item of items) {
+    const text = item.text?.trim();
+    if (!text) continue;
+    if (item.role === "user") {
+      lines.push(`> ${text}`);
+    } else if (item.role === "assistant") {
+      lines.push(text);
+    }
+  }
+  return lines;
 };
 
 const buildProjectMessage = (project: ProjectRuntime | null, message: string) => {
@@ -43,40 +74,31 @@ const findTileBySessionKey = (
 };
 
 const AgentCanvasPage = () => {
-  const {
-    client,
-    status,
-    gatewayUrl,
-    token,
-    setGatewayUrl,
-    setToken,
-  } = useGatewayConnection();
+  const { client, status } = useGatewayConnection();
 
-  const { state, dispatch, createTile, createProject, deleteProject } =
-    useAgentCanvasStore();
+  const {
+    state,
+    dispatch,
+    createTile,
+    createProject,
+    deleteProject,
+    deleteTile,
+    renameTile,
+  } = useAgentCanvasStore();
   const project = getActiveProject(state);
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [projectName, setProjectName] = useState("");
-  const [projectPath, setProjectPath] = useState("");
   const [projectWarnings, setProjectWarnings] = useState<string[]>([]);
 
   const tiles = project?.tiles ?? [];
-  const tileCount = tiles.length;
 
-  const handleNewAgent = useCallback(() => {
+  const handleNewAgent = useCallback(async () => {
     if (!project) return;
-    const tile = createTile(project.id);
-    const offset = tileCount * 36;
-    dispatch({
-      type: "addTile",
-      projectId: project.id,
-      tile: {
-        ...tile,
-        position: { x: 80 + offset, y: 80 + offset },
-      },
-    });
-    dispatch({ type: "selectTile", tileId: tile.id });
-  }, [createTile, dispatch, project, tileCount]);
+    const name = `Agent ${crypto.randomUUID().slice(0, 4)}`;
+    const result = await createTile(project.id, name, "coding");
+    if (!result) return;
+    dispatch({ type: "selectTile", tileId: result.tile.id });
+  }, [createTile, dispatch, project]);
 
   const handleSend = useCallback(
     async (tileId: string, sessionKey: string, message: string) => {
@@ -84,6 +106,16 @@ const AgentCanvasPage = () => {
       const trimmed = message.trim();
       if (!trimmed) return;
       const runId = crypto.randomUUID();
+      const tile = project.tiles.find((entry) => entry.id === tileId);
+      if (!tile) {
+        dispatch({
+          type: "appendOutput",
+          projectId: project.id,
+          tileId,
+          line: "Error: Tile not found.",
+        });
+        return;
+      }
       dispatch({
         type: "updateTile",
         projectId: project.id,
@@ -99,6 +131,19 @@ const AgentCanvasPage = () => {
       try {
         if (!sessionKey) {
           throw new Error("Missing session key for tile.");
+        }
+        if (!tile.sessionSettingsSynced) {
+          await client.call("sessions.patch", {
+            key: sessionKey,
+            model: tile.model ?? null,
+            thinkingLevel: tile.thinkingLevel ?? null,
+          });
+          dispatch({
+            type: "updateTile",
+            projectId: project.id,
+            tileId,
+            patch: { sessionSettingsSynced: true },
+          });
         }
         await client.call("chat.send", {
           sessionKey,
@@ -125,6 +170,51 @@ const AgentCanvasPage = () => {
     [client, dispatch, project]
   );
 
+  const previewedKeysRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    previewedKeysRef.current = new Set();
+  }, [project?.id]);
+
+  useEffect(() => {
+    if (status !== "connected") return;
+    if (!project) return;
+    const keys = project.tiles
+      .map((tile) => tile.sessionKey)
+      .filter((key) => Boolean(key?.trim())) as string[];
+    const pendingKeys = keys.filter((key) => !previewedKeysRef.current.has(key));
+    if (pendingKeys.length === 0) return;
+
+    const loadPreviews = async () => {
+      try {
+        const result = await client.call<SessionsPreviewResult>("sessions.preview", {
+          keys: pendingKeys,
+          limit: 40,
+          maxChars: 1600,
+        });
+        for (const preview of result.previews ?? []) {
+          previewedKeysRef.current.add(preview.key);
+          if (preview.status !== "ok") continue;
+          const tile = project.tiles.find((entry) => entry.sessionKey === preview.key);
+          if (!tile || tile.status === "running" || tile.outputLines.length > 0) continue;
+          const lines = buildPreviewLines(preview.items);
+          if (lines.length === 0) continue;
+          dispatch({
+            type: "updateTile",
+            projectId: project.id,
+            tileId: tile.id,
+            patch: { outputLines: lines, lastResult: lines[lines.length - 1] ?? null },
+          });
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to load session preview.";
+        console.error(msg);
+      }
+    };
+
+    void loadPreviews();
+  }, [client, dispatch, project, status]);
+
   const handleModelChange = useCallback(
     async (tileId: string, sessionKey: string, value: string | null) => {
       if (!project) return;
@@ -138,6 +228,12 @@ const AgentCanvasPage = () => {
         await client.call("sessions.patch", {
           key: sessionKey,
           model: value ?? null,
+        });
+        dispatch({
+          type: "updateTile",
+          projectId: project.id,
+          tileId,
+          patch: { sessionSettingsSynced: true },
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to set model.";
@@ -165,6 +261,12 @@ const AgentCanvasPage = () => {
         await client.call("sessions.patch", {
           key: sessionKey,
           thinkingLevel: value ?? null,
+        });
+        dispatch({
+          type: "updateTile",
+          projectId: project.id,
+          tileId,
+          patch: { sessionSettingsSynced: true },
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to set thinking level.";
@@ -284,24 +386,70 @@ const AgentCanvasPage = () => {
   const canvasPatch = useMemo(() => state.canvas, [state.canvas]);
 
   const handleProjectCreate = useCallback(async () => {
-    if (!projectName.trim() || !projectPath.trim()) {
-      setProjectWarnings(["Project name and path are required."]);
+    if (!projectName.trim()) {
+      setProjectWarnings(["Project name is required."]);
       return;
     }
-    const result = await createProject(projectName.trim(), projectPath.trim());
+    const result = await createProject(projectName.trim());
     if (!result) return;
     setProjectWarnings(result.warnings);
     setProjectName("");
-    setProjectPath("");
     setShowProjectForm(false);
-  }, [createProject, projectName, projectPath]);
+  }, [createProject, projectName]);
 
   const handleProjectDelete = useCallback(async () => {
     if (!project) return;
-    const confirmed = window.confirm(`Delete project "${project.name}"?`);
-    if (!confirmed) return;
-    await deleteProject(project.id);
+    const confirmation = window.prompt(
+      `Type DELETE ${project.name} to confirm project deletion.`
+    );
+    if (confirmation !== `DELETE ${project.name}`) {
+      return;
+    }
+    const result = await deleteProject(project.id);
+    if (result?.warnings.length) {
+      window.alert(result.warnings.join("\n"));
+    }
   }, [deleteProject, project]);
+
+  const handleCreateDiscordChannel = useCallback(async () => {
+    if (!project) return;
+    if (!state.selectedTileId) {
+      window.alert("Select an agent tile first.");
+      return;
+    }
+    const tile = project.tiles.find((entry) => entry.id === state.selectedTileId);
+    if (!tile) {
+      window.alert("Selected agent not found.");
+      return;
+    }
+    try {
+      const result = await createProjectDiscordChannel(project.id, {
+        agentId: tile.agentId,
+        agentName: tile.name,
+      });
+      const notice = `Created Discord channel #${result.channelName} for ${tile.name}.`;
+      if (result.warnings.length) {
+        window.alert(`${notice}\n${result.warnings.join("\n")}`);
+      } else {
+        window.alert(notice);
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to create Discord channel.";
+      window.alert(message);
+    }
+  }, [project, state.selectedTileId]);
+
+  const handleTileDelete = useCallback(
+    async (tileId: string) => {
+      if (!project) return;
+      const result = await deleteTile(project.id, tileId);
+      if (result?.warnings.length) {
+        window.alert(result.warnings.join("\n"));
+      }
+    },
+    [deleteTile, project]
+  );
 
   return (
     <div className="relative h-screen w-screen overflow-hidden">
@@ -331,21 +479,21 @@ const AgentCanvasPage = () => {
               })
             : null
         }
-        onDeleteTile={(id) =>
-          project
-            ? dispatch({ type: "removeTile", projectId: project.id, tileId: id })
-            : null
-        }
-        onRenameTile={(id, name) =>
-          project
-            ? dispatch({
-                type: "updateTile",
-                projectId: project.id,
-                tileId: id,
-                patch: { name },
-              })
-            : null
-        }
+        onDeleteTile={handleTileDelete}
+        onRenameTile={(id, name) => {
+          if (!project) return Promise.resolve(false);
+          return renameTile(project.id, id, name).then((result) => {
+            if (!result) return false;
+            if ("error" in result) {
+              window.alert(result.error);
+              return false;
+            }
+            if (result.warnings.length > 0) {
+              window.alert(result.warnings.join("\n"));
+            }
+            return true;
+          });
+        }}
         onDraftChange={(id, value) =>
           project
             ? dispatch({
@@ -380,6 +528,8 @@ const AgentCanvasPage = () => {
             }}
             onDeleteProject={handleProjectDelete}
             onNewAgent={handleNewAgent}
+            onCreateDiscordChannel={handleCreateDiscordChannel}
+            canCreateDiscordChannel={Boolean(project && project.tiles.length > 0)}
             onCenterCanvas={handleCenterCanvas}
             zoom={state.canvas.zoom}
             onZoomIn={handleZoomIn}
@@ -398,22 +548,13 @@ const AgentCanvasPage = () => {
           <div className="pointer-events-auto mx-auto w-full max-w-5xl">
             <div className="glass-panel px-6 py-6">
               <div className="flex flex-col gap-4">
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4">
                   <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
                     Project name
                     <input
                       className="h-11 rounded-full border border-slate-300 bg-white/80 px-4 text-sm text-slate-900 outline-none"
                       value={projectName}
                       onChange={(event) => setProjectName(event.target.value)}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-                    Repo path (absolute)
-                    <input
-                      className="h-11 rounded-full border border-slate-300 bg-white/80 px-4 text-sm text-slate-900 outline-none"
-                      value={projectPath}
-                      onChange={(event) => setProjectPath(event.target.value)}
-                      placeholder="/Users/you/project"
                     />
                   </label>
                 </div>

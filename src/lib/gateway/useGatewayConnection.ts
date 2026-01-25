@@ -8,9 +8,6 @@ import {
 } from "./GatewayClient";
 
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
-const STORAGE_URL_KEY = "clawdbot.gateway.url";
-const STORAGE_TOKEN_KEY = "clawdbot.gateway.token";
-
 const formatGatewayError = (error: unknown) => {
   if (error instanceof GatewayResponseError) {
     return `Gateway error (${error.code}): ${error.message}`;
@@ -38,34 +35,41 @@ export const useGatewayConnection = (): GatewayConnectionState => {
   const [client] = useState(() => new GatewayClient());
   const didAutoConnect = useRef(false);
 
-  const [gatewayUrl, setGatewayUrl] = useState(() => {
-    if (typeof window === "undefined") {
-      return DEFAULT_GATEWAY_URL;
-    }
-    return localStorage.getItem(STORAGE_URL_KEY) ?? DEFAULT_GATEWAY_URL;
-  });
-  const [token, setToken] = useState(() => {
-    if (typeof window === "undefined") {
-      return "";
-    }
-    return localStorage.getItem(STORAGE_TOKEN_KEY) ?? "";
-  });
+  const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_GATEWAY_URL);
+  const [token, setToken] = useState("");
   const [status, setStatus] = useState<GatewayStatus>("disconnected");
   const [error, setError] = useState<string | null>(null);
+  const [configLoaded, setConfigLoaded] = useState(false);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    localStorage.setItem(STORAGE_URL_KEY, gatewayUrl);
-  }, [gatewayUrl]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    localStorage.setItem(STORAGE_TOKEN_KEY, token);
-  }, [token]);
+    let cancelled = false;
+    const loadConfig = async () => {
+      try {
+        const res = await fetch("/api/gateway", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { gatewayUrl?: string; token?: string };
+        if (cancelled) return;
+        if (typeof data.gatewayUrl === "string" && data.gatewayUrl.trim()) {
+          setGatewayUrl(data.gatewayUrl);
+        }
+        if (typeof data.token === "string") {
+          setToken(data.token);
+        }
+      } catch {
+        if (!cancelled) {
+          setError("Failed to load gateway config.");
+        }
+      } finally {
+        if (!cancelled) {
+          setConfigLoaded(true);
+        }
+      }
+    };
+    void loadConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     return client.onStatus((nextStatus) => {
@@ -93,10 +97,11 @@ export const useGatewayConnection = (): GatewayConnectionState => {
 
   useEffect(() => {
     if (didAutoConnect.current) return;
+    if (!configLoaded) return;
     if (!gatewayUrl.trim()) return;
     didAutoConnect.current = true;
     void connect();
-  }, [connect, gatewayUrl]);
+  }, [connect, configLoaded, gatewayUrl]);
 
   const disconnect = useCallback(() => {
     setError(null);

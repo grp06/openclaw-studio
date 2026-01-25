@@ -8,6 +8,8 @@ type HeaderBarProps = {
   onCreateProject: () => void;
   onDeleteProject: () => void;
   onNewAgent: () => void;
+  onCreateDiscordChannel: () => void;
+  canCreateDiscordChannel: boolean;
   onCenterCanvas: () => void;
   zoom: number;
   onZoomIn: () => void;
@@ -29,6 +31,8 @@ export const HeaderBar = ({
   onCreateProject,
   onDeleteProject,
   onNewAgent,
+  onCreateDiscordChannel,
+  canCreateDiscordChannel,
   onCenterCanvas,
   zoom,
   onZoomIn,
@@ -63,6 +67,11 @@ export const HeaderBar = ({
             <span className="text-sm font-semibold text-slate-500">No projects</span>
           )}
         </div>
+        <span
+          className={`rounded-full px-3 py-2 text-xs font-semibold uppercase ${statusStyles[status]}`}
+        >
+          {status}
+        </span>
         <button
           className="rounded-full border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700"
           type="button"
@@ -81,14 +90,24 @@ export const HeaderBar = ({
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent-strong)]"
-          type="button"
-          onClick={onNewAgent}
-          disabled={!activeProjectId}
-        >
-          New Agent
-        </button>
+        {activeProjectId ? (
+          <button
+            className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent-strong)]"
+            type="button"
+            onClick={onNewAgent}
+          >
+            New Agent
+          </button>
+        ) : null}
+        {canCreateDiscordChannel ? (
+          <button
+            className="rounded-full border border-slate-300 px-4 py-2 text-xs font-semibold text-slate-700"
+            type="button"
+            onClick={onCreateDiscordChannel}
+          >
+            Create Discord Channel
+          </button>
+        ) : null}
         <button
           className="rounded-full border border-slate-300 px-4 py-2 text-xs font-semibold text-slate-700"
           type="button"
