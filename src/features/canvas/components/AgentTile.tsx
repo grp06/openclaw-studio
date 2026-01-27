@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentTile as AgentTileType, TilePosition, TileSize } from "@/features/canvas/state/store";
+import { isTraceMarkdown, stripTraceMarkdown } from "@/lib/text/extractThinking";
 
 const MIN_SIZE = { width: 560, height: 440 };
 
@@ -185,13 +186,33 @@ export const AgentTile = ({
             <div className="flex flex-col gap-2">
               {showThinking ? (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-800">
-                  {tile.thinkingTrace}
+                  <div className="agent-markdown">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {tile.thinkingTrace}
+                    </ReactMarkdown>
+                  </div>
                 </div>
               ) : null}
               {tile.outputLines.map((line, index) => (
-                <div key={`${tile.id}-line-${index}`} className="agent-markdown">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{line}</ReactMarkdown>
-                </div>
+                isTraceMarkdown(line) ? (
+                  <details
+                    key={`${tile.id}-line-${index}`}
+                    className="rounded-xl border border-slate-200 bg-white/80 px-2 py-1 text-[11px] text-slate-600"
+                  >
+                    <summary className="cursor-pointer select-none font-semibold">
+                      Trace
+                    </summary>
+                    <div className="agent-markdown mt-1 text-slate-700">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {stripTraceMarkdown(line)}
+                      </ReactMarkdown>
+                    </div>
+                  </details>
+                ) : (
+                  <div key={`${tile.id}-line-${index}`} className="agent-markdown">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{line}</ReactMarkdown>
+                  </div>
+                )
               ))}
               {tile.streamText ? (
                 <div className="agent-markdown text-slate-500">
@@ -214,11 +235,11 @@ export const AgentTile = ({
                 onModelChange(value ? value : null);
               }}
             >
+              <option value="openai-codex/gpt-5.2-codex">GPT-5.2 Codex</option>
               <option value="xai/grok-4-1-fast-reasoning">grok-4-1-fast-reasoning</option>
               <option value="xai/grok-4-1-fast-non-reasoning">
                 grok-4-1-fast-non-reasoning
               </option>
-              <option value="openai-codex/gpt-5.2-codex">GPT-5.2 Codex</option>
               <option value="zai/glm-4.7">glm-4.7</option>
             </select>
           </label>
