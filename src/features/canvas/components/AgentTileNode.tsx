@@ -1,8 +1,8 @@
 "use client";
 
-import { NodeResizeControl, type Node, type NodeProps } from "@xyflow/react";
+import { type Node, type NodeProps } from "@xyflow/react";
 import type { AgentTile as AgentTileType, TileSize } from "@/features/canvas/state/store";
-import { AgentTile, MIN_TILE_SIZE } from "./AgentTile";
+import { AgentTile } from "./AgentTile";
 
 export type AgentTileNodeData = {
   tile: AgentTileType;
@@ -17,6 +17,7 @@ export type AgentTileNodeData = {
   onThinkingChange: (value: string | null) => void;
   onAvatarShuffle: () => void;
   onNameShuffle: () => void;
+  onResizeEnd?: (size: TileSize) => void;
 };
 
 type AgentTileNodeType = Node<AgentTileNodeData>;
@@ -35,21 +36,11 @@ export const AgentTileNode = ({ data, selected }: NodeProps<AgentTileNodeType>) 
     onThinkingChange,
     onAvatarShuffle,
     onNameShuffle,
+    onResizeEnd,
   } = data;
 
   return (
     <div className="h-full w-full">
-      <NodeResizeControl
-        position="bottom"
-        className="tile-resize-handle"
-        minWidth={MIN_TILE_SIZE.width}
-        maxWidth={MIN_TILE_SIZE.width}
-        minHeight={MIN_TILE_SIZE.height}
-        resizeDirection="vertical"
-        onResizeEnd={(_, params) => {
-          onResize({ width: MIN_TILE_SIZE.width, height: params.height });
-        }}
-      />
       <AgentTile
         tile={tile}
         projectId={projectId}
@@ -64,6 +55,7 @@ export const AgentTileNode = ({ data, selected }: NodeProps<AgentTileNodeType>) 
         onAvatarShuffle={onAvatarShuffle}
         onNameShuffle={onNameShuffle}
         onResize={onResize}
+        onResizeEnd={onResizeEnd}
       />
     </div>
   );

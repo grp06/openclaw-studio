@@ -8,7 +8,9 @@ import { isTraceMarkdown, stripTraceMarkdown } from "@/lib/text/extractThinking"
 import { normalizeAgentName } from "@/lib/names/agentNames";
 import { Settings, Shuffle } from "lucide-react";
 import {
+  fetchProjectTileHeartbeat,
   fetchProjectTileWorkspaceFiles,
+  updateProjectTileHeartbeat,
   updateProjectTileWorkspaceFiles,
 } from "@/lib/projects/client";
 import {
@@ -17,20 +19,15 @@ import {
   WORKSPACE_FILE_PLACEHOLDERS,
   type WorkspaceFileName,
 } from "@/lib/projects/workspaceFiles";
+import { MAX_TILE_HEIGHT, MIN_TILE_SIZE } from "@/lib/canvasTileDefaults";
 import { AgentAvatar } from "./AgentAvatar";
 
-export const MIN_TILE_SIZE = { width: 420, height: 520 };
+const HEARTBEAT_INTERVAL_OPTIONS = ["15m", "30m", "1h", "2h", "6h", "12h", "24h"];
 
 const buildWorkspaceState = () =>
   Object.fromEntries(
     WORKSPACE_FILE_NAMES.map((name) => [name, { content: "", exists: false }])
   ) as Record<WorkspaceFileName, { content: string; exists: boolean }>;
-
-const buildWorkspaceExpanded = () =>
-  Object.fromEntries(WORKSPACE_FILE_NAMES.map((name) => [name, false])) as Record<
-    WorkspaceFileName,
-    boolean
-  >;
 
 const isWorkspaceFileName = (value: string): value is WorkspaceFileName =>
   WORKSPACE_FILE_NAMES.includes(value as WorkspaceFileName);
@@ -49,6 +46,7 @@ type AgentTileProps = {
   onAvatarShuffle: () => void;
   onNameShuffle: () => void;
   onResize?: (size: TileSize) => void;
+  onResizeEnd?: (size: TileSize) => void;
 };
 
 export const AgentTile = ({
@@ -65,20 +63,59 @@ export const AgentTile = ({
   onAvatarShuffle,
   onNameShuffle,
   onResize,
+  onResizeEnd,
 }: AgentTileProps) => {
   const [nameDraft, setNameDraft] = useState(tile.name);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceFiles, setWorkspaceFiles] = useState(buildWorkspaceState);
-  const [workspaceExpanded, setWorkspaceExpanded] = useState(buildWorkspaceExpanded);
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceFileName>(
+    WORKSPACE_FILE_NAMES[0]
+  );
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [workspaceDirty, setWorkspaceDirty] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const workspaceItemRefs = useRef<Record<WorkspaceFileName, HTMLDivElement | null>>(
-    buildWorkspaceExpanded()
-  );
+  const [heartbeatLoading, setHeartbeatLoading] = useState(false);
+  const [heartbeatSaving, setHeartbeatSaving] = useState(false);
+  const [heartbeatDirty, setHeartbeatDirty] = useState(false);
+  const [heartbeatError, setHeartbeatError] = useState<string | null>(null);
+  const [heartbeatOverride, setHeartbeatOverride] = useState(false);
+  const [heartbeatEnabled, setHeartbeatEnabled] = useState(true);
+  const [heartbeatEvery, setHeartbeatEvery] = useState("30m");
+  const [heartbeatIntervalMode, setHeartbeatIntervalMode] = useState<
+    "preset" | "custom"
+  >("preset");
+  const [heartbeatCustomMinutes, setHeartbeatCustomMinutes] = useState("45");
+  const [heartbeatTargetMode, setHeartbeatTargetMode] = useState<
+    "last" | "none" | "custom"
+  >("last");
+  const [heartbeatTargetCustom, setHeartbeatTargetCustom] = useState("");
+  const [heartbeatIncludeReasoning, setHeartbeatIncludeReasoning] = useState(false);
+  const [heartbeatActiveHoursEnabled, setHeartbeatActiveHoursEnabled] =
+    useState(false);
+  const [heartbeatActiveStart, setHeartbeatActiveStart] = useState("08:00");
+  const [heartbeatActiveEnd, setHeartbeatActiveEnd] = useState("18:00");
+  const [heartbeatAckMaxChars, setHeartbeatAckMaxChars] = useState("300");
   const outputRef = useRef<HTMLDivElement | null>(null);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
+  const resizeStateRef = useRef<{
+    active: boolean;
+    axis: "height" | "width";
+    startX?: number;
+    startY?: number;
+    startWidth?: number;
+    startHeight?: number;
+  } | null>(null);
+  const userResizedRef = useRef(false);
+  const resizeFrameRef = useRef<number | null>(null);
+  const resizeSizeRef = useRef<TileSize>({
+    width: tile.size.width,
+    height: tile.size.height,
+  });
+  const resizeHandlersRef = useRef<{
+    move: (event: PointerEvent) => void;
+    stop: () => void;
+  } | null>(null);
   const scrollOutputToBottom = useCallback(() => {
     const el = outputRef.current;
     if (!el) return;
@@ -87,7 +124,6 @@ export const AgentTile = ({
 
   const handleOutputWheel = useCallback(
     (event: React.WheelEvent<HTMLDivElement>) => {
-      if (!isSelected) return;
       const el = outputRef.current;
       if (!el) return;
       event.preventDefault();
@@ -99,7 +135,7 @@ export const AgentTile = ({
       el.scrollTop = nextTop;
       el.scrollLeft = nextLeft;
     },
-    [isSelected]
+    []
   );
 
   useEffect(() => {
@@ -112,6 +148,7 @@ export const AgentTile = ({
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
+    el.style.overflowY = el.scrollHeight > el.clientHeight ? "auto" : "hidden";
   }, []);
 
   useEffect(() => {
@@ -123,19 +160,146 @@ export const AgentTile = ({
   }, [resizeDraft, tile.draft]);
 
   useEffect(() => {
+    resizeSizeRef.current = {
+      width: tile.size.width,
+      height: tile.size.height,
+    };
+  }, [tile.size.height, tile.size.width]);
+
+  const stopResize = useCallback(() => {
+    if (!resizeStateRef.current?.active) return;
+    resizeStateRef.current = null;
+    if (resizeHandlersRef.current) {
+      window.removeEventListener("pointermove", resizeHandlersRef.current.move);
+      window.removeEventListener("pointerup", resizeHandlersRef.current.stop);
+      window.removeEventListener("pointercancel", resizeHandlersRef.current.stop);
+      resizeHandlersRef.current = null;
+    }
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    if (resizeFrameRef.current !== null) {
+      cancelAnimationFrame(resizeFrameRef.current);
+      resizeFrameRef.current = null;
+    }
+    if (onResizeEnd) {
+      onResizeEnd(resizeSizeRef.current);
+    }
+  }, [onResizeEnd]);
+
+  const scheduleResize = useCallback(
+    (size: Partial<TileSize>) => {
+      resizeSizeRef.current = {
+        ...resizeSizeRef.current,
+        ...size,
+      };
+      if (resizeFrameRef.current !== null) return;
+      resizeFrameRef.current = requestAnimationFrame(() => {
+        resizeFrameRef.current = null;
+        onResize?.(resizeSizeRef.current);
+      });
+    },
+    [onResize]
+  );
+
+  const startHeightResize = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (!onResize) return;
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      const startY = event.clientY;
+      const startHeight = tile.size.height;
+      resizeStateRef.current = {
+        active: true,
+        axis: "height",
+        startY,
+        startHeight,
+      };
+      document.body.style.cursor = "row-resize";
+      document.body.style.userSelect = "none";
+      const move = (moveEvent: PointerEvent) => {
+        if (!resizeStateRef.current?.active) return;
+        const delta = moveEvent.clientY - startY;
+        const nextHeight = Math.min(
+          MAX_TILE_HEIGHT,
+          Math.max(MIN_TILE_SIZE.height, startHeight + delta)
+        );
+        scheduleResize({ height: nextHeight });
+      };
+      const stop = () => {
+        stopResize();
+      };
+      resizeHandlersRef.current = { move, stop };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", stop);
+      window.addEventListener("pointercancel", stop);
+    },
+    [onResize, scheduleResize, stopResize, tile.size.height]
+  );
+
+  const startWidthResize = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (!onResize) return;
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      userResizedRef.current = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      const startX = event.clientX;
+      const startWidth = tile.size.width;
+      resizeStateRef.current = {
+        active: true,
+        axis: "width",
+        startX,
+        startWidth,
+      };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      const move = (moveEvent: PointerEvent) => {
+        if (!resizeStateRef.current?.active) return;
+        const delta = moveEvent.clientX - startX;
+        const nextWidth = Math.max(MIN_TILE_SIZE.width, startWidth + delta);
+        scheduleResize({ width: nextWidth });
+      };
+      const stop = () => {
+        stopResize();
+      };
+      resizeHandlersRef.current = { move, stop };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", stop);
+      window.addEventListener("pointercancel", stop);
+    },
+    [onResize, scheduleResize, stopResize, tile.size.width]
+  );
+
+  useEffect(() => {
     const output = outputRef.current;
     if (!output) return;
+    if (resizeStateRef.current?.active || userResizedRef.current) return;
     const extra = Math.ceil(output.scrollHeight - output.clientHeight);
     if (extra <= 0) return;
-    onResize?.({ width: tile.size.width, height: tile.size.height + extra });
+    const nextHeight = Math.min(MAX_TILE_HEIGHT, tile.size.height + extra);
+    if (nextHeight <= tile.size.height) return;
+    if (onResizeEnd) {
+      resizeSizeRef.current = { ...resizeSizeRef.current, height: nextHeight };
+      onResizeEnd(resizeSizeRef.current);
+    } else {
+      onResize?.({ width: tile.size.width, height: nextHeight });
+    }
   }, [
     onResize,
+    onResizeEnd,
     tile.outputLines,
     tile.streamText,
     tile.thinkingTrace,
     tile.size.height,
     tile.size.width,
   ]);
+
+  useEffect(() => {
+    return () => stopResize();
+  }, [stopResize]);
 
   const commitName = async () => {
     const next = normalizeAgentName(nameDraft);
@@ -156,10 +320,10 @@ export const AgentTile = ({
 
   const statusColor =
     tile.status === "running"
-      ? "bg-amber-200 text-amber-900"
+      ? "bg-emerald-200 text-emerald-900"
       : tile.status === "error"
         ? "bg-rose-200 text-rose-900"
-        : "bg-emerald-200 text-emerald-900";
+        : "bg-amber-200 text-amber-900";
   const showThinking = tile.status === "running" && Boolean(tile.thinkingTrace);
   const showTranscript =
     tile.outputLines.length > 0 || Boolean(tile.streamText) || showThinking;
@@ -222,10 +386,143 @@ export const AgentTile = ({
     }
   }, [projectId, tile.id, workspaceFiles]);
 
+  const handleWorkspaceTabChange = useCallback(
+    (nextTab: WorkspaceFileName) => {
+      if (nextTab === workspaceTab) return;
+      if (workspaceDirty && !workspaceSaving) {
+        void saveWorkspaceFiles();
+      }
+      setWorkspaceTab(nextTab);
+    },
+    [saveWorkspaceFiles, workspaceDirty, workspaceSaving, workspaceTab]
+  );
+
+  const loadHeartbeat = useCallback(async () => {
+    if (!projectId) return;
+    setHeartbeatLoading(true);
+    setHeartbeatError(null);
+    try {
+      const result = await fetchProjectTileHeartbeat(projectId, tile.id);
+      const every = result.heartbeat.every ?? "30m";
+      const enabled = every !== "0m";
+      const isPreset = HEARTBEAT_INTERVAL_OPTIONS.includes(every);
+      if (isPreset) {
+        setHeartbeatIntervalMode("preset");
+      } else {
+        setHeartbeatIntervalMode("custom");
+        const parsed =
+          every.endsWith("m")
+            ? Number.parseInt(every, 10)
+            : every.endsWith("h")
+              ? Number.parseInt(every, 10) * 60
+              : Number.parseInt(every, 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          setHeartbeatCustomMinutes(String(parsed));
+        }
+      }
+      const target = result.heartbeat.target ?? "last";
+      const targetMode =
+        target === "last" || target === "none" ? target : "custom";
+      setHeartbeatOverride(result.hasOverride);
+      setHeartbeatEnabled(enabled);
+      setHeartbeatEvery(enabled ? every : "30m");
+      setHeartbeatTargetMode(targetMode);
+      setHeartbeatTargetCustom(targetMode === "custom" ? target : "");
+      setHeartbeatIncludeReasoning(Boolean(result.heartbeat.includeReasoning));
+      if (result.heartbeat.activeHours) {
+        setHeartbeatActiveHoursEnabled(true);
+        setHeartbeatActiveStart(result.heartbeat.activeHours.start);
+        setHeartbeatActiveEnd(result.heartbeat.activeHours.end);
+      } else {
+        setHeartbeatActiveHoursEnabled(false);
+      }
+      if (typeof result.heartbeat.ackMaxChars === "number") {
+        setHeartbeatAckMaxChars(String(result.heartbeat.ackMaxChars));
+      } else {
+        setHeartbeatAckMaxChars("300");
+      }
+      setHeartbeatDirty(false);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load heartbeat settings.";
+      setHeartbeatError(message);
+    } finally {
+      setHeartbeatLoading(false);
+    }
+  }, [projectId, tile.id]);
+
+  const saveHeartbeat = useCallback(async () => {
+    if (!projectId) return;
+    setHeartbeatSaving(true);
+    setHeartbeatError(null);
+    try {
+      const target =
+        heartbeatTargetMode === "custom"
+          ? heartbeatTargetCustom.trim()
+          : heartbeatTargetMode;
+      let every = heartbeatEnabled ? heartbeatEvery.trim() : "0m";
+      if (heartbeatEnabled && heartbeatIntervalMode === "custom") {
+        const customValue = Number.parseInt(heartbeatCustomMinutes, 10);
+        if (!Number.isFinite(customValue) || customValue <= 0) {
+          setHeartbeatError("Custom interval must be a positive number.");
+          setHeartbeatSaving(false);
+          return;
+        }
+        every = `${customValue}m`;
+      }
+      const ackParsed = Number.parseInt(heartbeatAckMaxChars, 10);
+      const ackMaxChars = Number.isFinite(ackParsed) ? ackParsed : 300;
+      const activeHours =
+        heartbeatActiveHoursEnabled && heartbeatActiveStart && heartbeatActiveEnd
+          ? { start: heartbeatActiveStart, end: heartbeatActiveEnd }
+          : null;
+      const result = await updateProjectTileHeartbeat(projectId, tile.id, {
+        override: heartbeatOverride,
+        heartbeat: {
+          every,
+          target: target || "last",
+          includeReasoning: heartbeatIncludeReasoning,
+          ackMaxChars,
+          activeHours,
+        },
+      });
+      setHeartbeatOverride(result.hasOverride);
+      setHeartbeatDirty(false);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to save heartbeat settings.";
+      setHeartbeatError(message);
+    } finally {
+      setHeartbeatSaving(false);
+    }
+  }, [
+    projectId,
+    tile.id,
+    heartbeatActiveEnd,
+    heartbeatActiveHoursEnabled,
+    heartbeatActiveStart,
+    heartbeatAckMaxChars,
+    heartbeatCustomMinutes,
+    heartbeatEnabled,
+    heartbeatEvery,
+    heartbeatIntervalMode,
+    heartbeatIncludeReasoning,
+    heartbeatOverride,
+    heartbeatTargetCustom,
+    heartbeatTargetMode,
+  ]);
+
   useEffect(() => {
     if (!settingsOpen) return;
     void loadWorkspaceFiles();
-  }, [loadWorkspaceFiles, settingsOpen]);
+    void loadHeartbeat();
+  }, [loadWorkspaceFiles, loadHeartbeat, settingsOpen]);
+
+  useEffect(() => {
+    if (!WORKSPACE_FILE_NAMES.includes(workspaceTab)) {
+      setWorkspaceTab(WORKSPACE_FILE_NAMES[0]);
+    }
+  }, [workspaceTab]);
 
   const settingsModal =
     settingsOpen && typeof document !== "undefined"
@@ -247,8 +544,36 @@ export const AgentTile = ({
                     <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                       Agent settings
                     </div>
-                    <div className="mt-1 text-2xl font-semibold text-slate-900">
-                      {tile.name}
+                    <div className="mt-3 flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 shadow-sm">
+                      <input
+                        className="w-full bg-transparent text-sm font-semibold uppercase tracking-wide text-slate-700 outline-none"
+                        value={nameDraft}
+                        onChange={(event) => setNameDraft(event.target.value)}
+                        onBlur={() => {
+                          void commitName();
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.currentTarget.blur();
+                          }
+                          if (event.key === "Escape") {
+                            setNameDraft(tile.name);
+                            event.currentTarget.blur();
+                          }
+                        }}
+                      />
+                      <button
+                        className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-white"
+                        type="button"
+                        aria-label="Shuffle name"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onNameShuffle();
+                        }}
+                      >
+                        <Shuffle className="h-3 w-3" />
+                      </button>
                     </div>
                   </div>
                   <button
@@ -260,61 +585,61 @@ export const AgentTile = ({
                   </button>
                 </div>
 
-                <div className="flex flex-col gap-4 overflow-hidden">
+                <div className="flex flex-1 flex-col gap-4 overflow-auto pr-1">
                   <div className="rounded-3xl border border-slate-200 bg-white/80 p-4">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Core
-                    </div>
-                    <label className="mt-4 flex flex-col gap-2 text-xs font-semibold uppercase text-slate-500">
-                      <span>Model</span>
-                      <select
-                        className="h-10 rounded-2xl border border-slate-200 bg-white/80 px-3 text-xs font-semibold text-slate-700"
-                        value={tile.model ?? ""}
-                        onChange={(event) => {
-                          const value = event.target.value.trim();
-                          onModelChange(value ? value : null);
-                        }}
-                      >
-                        <option value="openai-codex/gpt-5.2-codex">GPT-5.2 Codex</option>
-                        <option value="xai/grok-4-1-fast-reasoning">
-                          grok-4-1-fast-reasoning
-                        </option>
-                        <option value="xai/grok-4-1-fast-non-reasoning">
-                          grok-4-1-fast-non-reasoning
-                        </option>
-                        <option value="zai/glm-4.7">glm-4.7</option>
-                      </select>
-                    </label>
-                    {tile.model === "xai/grok-4-1-fast-non-reasoning" ? null : (
-                      <label className="mt-4 flex flex-col gap-2 text-xs font-semibold uppercase text-slate-500">
-                        <span>Thinking</span>
+                    <div className="grid gap-3 md:grid-cols-[1.2fr_1fr]">
+                      <label className="flex flex-col gap-2 text-xs font-semibold uppercase text-slate-500">
+                        <span>Model</span>
                         <select
                           className="h-10 rounded-2xl border border-slate-200 bg-white/80 px-3 text-xs font-semibold text-slate-700"
-                          value={tile.thinkingLevel ?? ""}
+                          value={tile.model ?? ""}
                           onChange={(event) => {
                             const value = event.target.value.trim();
-                            onThinkingChange(value ? value : null);
+                            onModelChange(value ? value : null);
                           }}
                         >
-                          <option value="">Default</option>
-                          <option value="off">Off</option>
-                          <option value="minimal">Minimal</option>
-                          <option value="low">Low</option>
-                          <option value="medium">Medium</option>
-                          <option value="high">High</option>
-                          <option value="xhigh">XHigh</option>
+                          <option value="openai-codex/gpt-5.2-codex">GPT-5.2 Codex</option>
+                          <option value="xai/grok-4-1-fast-reasoning">
+                            grok-4-1-fast-reasoning
+                          </option>
+                          <option value="xai/grok-4-1-fast-non-reasoning">
+                            grok-4-1-fast-non-reasoning
+                          </option>
+                          <option value="zai/glm-4.7">glm-4.7</option>
                         </select>
                       </label>
-                    )}
+                      {tile.model === "xai/grok-4-1-fast-non-reasoning" ? (
+                        <div />
+                      ) : (
+                        <label className="flex flex-col gap-2 text-xs font-semibold uppercase text-slate-500">
+                          <span>Thinking</span>
+                          <select
+                            className="h-10 rounded-2xl border border-slate-200 bg-white/80 px-3 text-xs font-semibold text-slate-700"
+                            value={tile.thinkingLevel ?? ""}
+                            onChange={(event) => {
+                              const value = event.target.value.trim();
+                              onThinkingChange(value ? value : null);
+                            }}
+                          >
+                            <option value="">Default</option>
+                            <option value="off">Off</option>
+                            <option value="minimal">Minimal</option>
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                            <option value="xhigh">XHigh</option>
+                          </select>
+                        </label>
+                      )}
+                    </div>
                     <button
-                      className="mt-6 w-full rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold uppercase text-rose-600"
+                      className="mt-4 w-full max-w-xs self-center rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold uppercase text-rose-600"
                       type="button"
                       onClick={onDelete}
                     >
                       Delete agent
                     </button>
                   </div>
-
                   <div className="flex min-h-[420px] flex-1 flex-col rounded-3xl border border-slate-200 bg-white/80 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -324,7 +649,7 @@ export const AgentTile = ({
                         {workspaceLoading
                           ? "Loading..."
                           : workspaceDirty
-                            ? "Unsaved changes"
+                            ? "Saving on tab change"
                             : "All changes saved"}
                       </div>
                     </div>
@@ -333,112 +658,283 @@ export const AgentTile = ({
                         {workspaceError}
                       </div>
                     ) : null}
-                    <div className="mt-4 flex-1 overflow-auto pr-1">
-                      <div className="flex flex-col gap-3">
-                        {WORKSPACE_FILE_NAMES.map((name) => {
-                          const meta = WORKSPACE_FILE_META[name];
-                          const isOpen = workspaceExpanded[name];
-                          const file = workspaceFiles[name];
-                          return (
-                            <div
-                              key={name}
-                              className="rounded-2xl border border-slate-200 bg-white/90 p-4"
-                              ref={(node) => {
-                                workspaceItemRefs.current[name] = node;
+                    <div className="mt-4 flex flex-wrap items-end gap-2">
+                      {WORKSPACE_FILE_NAMES.map((name) => {
+                        const active = name === workspaceTab;
+                        const label = WORKSPACE_FILE_META[name].title.replace(".md", "");
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            className={`rounded-t-2xl border px-3 py-2 text-[11px] font-semibold uppercase tracking-wide transition ${
+                              active
+                                ? "border-slate-200 bg-white text-slate-900 shadow-sm"
+                                : "border-transparent bg-slate-100/60 text-slate-500 hover:bg-white"
+                            }`}
+                            onClick={() => handleWorkspaceTabChange(name)}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-white/90 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-slate-800">
+                            {WORKSPACE_FILE_META[workspaceTab].title}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {WORKSPACE_FILE_META[workspaceTab].hint}
+                          </div>
+                        </div>
+                        {!workspaceFiles[workspaceTab].exists ? (
+                          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold uppercase text-amber-700">
+                            new
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <textarea
+                        className="mt-4 min-h-[220px] w-full resize-y rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-800 outline-none"
+                        value={workspaceFiles[workspaceTab].content}
+                        placeholder={
+                          workspaceFiles[workspaceTab].content.trim().length === 0
+                            ? WORKSPACE_FILE_PLACEHOLDERS[workspaceTab]
+                            : undefined
+                        }
+                        disabled={workspaceLoading || workspaceSaving}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setWorkspaceFiles((prev) => ({
+                            ...prev,
+                            [workspaceTab]: { ...prev[workspaceTab], content: value },
+                          }));
+                          setWorkspaceDirty(true);
+                        }}
+                      />
+
+                      {workspaceTab === "HEARTBEAT.md" ? (
+                        <div className="mt-4 rounded-2xl border border-slate-200 bg-white/80 p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Heartbeat config
+                            </div>
+                            <div className="text-[11px] font-semibold uppercase text-slate-400">
+                              {heartbeatLoading
+                                ? "Loading..."
+                                : heartbeatDirty
+                                  ? "Unsaved changes"
+                                  : "All changes saved"}
+                            </div>
+                          </div>
+                          {heartbeatError ? (
+                            <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
+                              {heartbeatError}
+                            </div>
+                          ) : null}
+                          <label className="mt-4 flex items-center justify-between gap-3 text-xs font-semibold uppercase text-slate-500">
+                            <span>Override defaults</span>
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-slate-300 text-slate-900"
+                              checked={heartbeatOverride}
+                              disabled={heartbeatLoading || heartbeatSaving}
+                              onChange={(event) => {
+                                setHeartbeatOverride(event.target.checked);
+                                setHeartbeatDirty(true);
+                              }}
+                            />
+                          </label>
+                          <label className="mt-4 flex items-center justify-between gap-3 text-xs font-semibold uppercase text-slate-500">
+                            <span>Enabled</span>
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-slate-300 text-slate-900"
+                              checked={heartbeatEnabled}
+                              disabled={heartbeatLoading || heartbeatSaving}
+                              onChange={(event) => {
+                                setHeartbeatEnabled(event.target.checked);
+                                setHeartbeatOverride(true);
+                                setHeartbeatDirty(true);
+                              }}
+                            />
+                          </label>
+                          <label className="mt-4 flex flex-col gap-2 text-xs font-semibold uppercase text-slate-500">
+                            <span>Interval</span>
+                            <select
+                              className="h-10 rounded-2xl border border-slate-200 bg-white/80 px-3 text-xs font-semibold text-slate-700"
+                              value={heartbeatIntervalMode === "custom" ? "custom" : heartbeatEvery}
+                              disabled={heartbeatLoading || heartbeatSaving}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                if (value === "custom") {
+                                  setHeartbeatIntervalMode("custom");
+                                } else {
+                                  setHeartbeatIntervalMode("preset");
+                                  setHeartbeatEvery(value);
+                                }
+                                setHeartbeatOverride(true);
+                                setHeartbeatDirty(true);
                               }}
                             >
-                              <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div>
-                                  <div className="text-sm font-semibold text-slate-800">
-                                    {meta.title}
-                                  </div>
-                                  <div className="text-xs text-slate-500">
-                                    {meta.hint}
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  {!file.exists ? (
-                                    <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold uppercase text-amber-700">
-                                      new
-                                    </span>
-                                  ) : null}
-                                  <button
-                                    className="rounded-full border border-slate-200 px-3 py-1 text-[11px] font-semibold uppercase text-slate-600"
-                                    type="button"
-                                    onClick={() => {
-                                      const shouldOpen = !workspaceExpanded[name];
-                                      setWorkspaceExpanded((prev) => ({
-                                        ...prev,
-                                        [name]: !prev[name],
-                                      }));
-                                      if (!shouldOpen) return;
-                                      const scrollTarget = workspaceItemRefs.current[name];
-                                      if (!scrollTarget) return;
-                                      requestAnimationFrame(() => {
-                                        requestAnimationFrame(() => {
-                                          scrollTarget.scrollIntoView({
-                                            behavior: "smooth",
-                                            block: "start",
-                                          });
-                                        });
-                                      });
-                                    }}
-                                  >
-                                    {isOpen ? "Hide" : "Edit"}
-                                  </button>
-                                </div>
-                              </div>
-                              {isOpen ? (
-                              <textarea
-                                className="mt-3 min-h-[140px] w-full resize-y rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-800 outline-none"
-                                value={file.content}
-                                placeholder={
-                                  file.content.trim().length === 0
-                                    ? WORKSPACE_FILE_PLACEHOLDERS[name]
-                                    : undefined
-                                }
-                                disabled={workspaceLoading || workspaceSaving}
+                              {HEARTBEAT_INTERVAL_OPTIONS.map((option) => (
+                                <option key={option} value={option}>
+                                  Every {option}
+                                </option>
+                              ))}
+                              <option value="custom">Custom</option>
+                            </select>
+                          </label>
+                          {heartbeatIntervalMode === "custom" ? (
+                            <input
+                              type="number"
+                              min={1}
+                              className="mt-2 h-10 w-full rounded-2xl border border-slate-200 bg-white/80 px-3 text-xs text-slate-700 outline-none"
+                              value={heartbeatCustomMinutes}
+                              disabled={heartbeatLoading || heartbeatSaving}
+                              onChange={(event) => {
+                                setHeartbeatCustomMinutes(event.target.value);
+                                setHeartbeatOverride(true);
+                                setHeartbeatDirty(true);
+                              }}
+                              placeholder="Minutes"
+                            />
+                          ) : null}
+                          <label className="mt-4 flex flex-col gap-2 text-xs font-semibold uppercase text-slate-500">
+                            <span>Target</span>
+                            <select
+                              className="h-10 rounded-2xl border border-slate-200 bg-white/80 px-3 text-xs font-semibold text-slate-700"
+                              value={heartbeatTargetMode}
+                              disabled={heartbeatLoading || heartbeatSaving}
+                              onChange={(event) => {
+                                setHeartbeatTargetMode(
+                                  event.target.value as "last" | "none" | "custom"
+                                );
+                                setHeartbeatOverride(true);
+                                setHeartbeatDirty(true);
+                              }}
+                            >
+                              <option value="last">Last channel</option>
+                              <option value="none">No delivery</option>
+                              <option value="custom">Custom</option>
+                            </select>
+                          </label>
+                          {heartbeatTargetMode === "custom" ? (
+                            <input
+                              className="mt-2 h-10 w-full rounded-2xl border border-slate-200 bg-white/80 px-3 text-xs text-slate-700 outline-none"
+                              value={heartbeatTargetCustom}
+                              disabled={heartbeatLoading || heartbeatSaving}
+                              onChange={(event) => {
+                                setHeartbeatTargetCustom(event.target.value);
+                                setHeartbeatOverride(true);
+                                setHeartbeatDirty(true);
+                              }}
+                              placeholder="Channel id (e.g., whatsapp)"
+                            />
+                          ) : null}
+                          <label className="mt-4 flex items-center justify-between gap-3 text-xs font-semibold uppercase text-slate-500">
+                            <span>Include reasoning</span>
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-slate-300 text-slate-900"
+                              checked={heartbeatIncludeReasoning}
+                              disabled={heartbeatLoading || heartbeatSaving}
+                              onChange={(event) => {
+                                setHeartbeatIncludeReasoning(event.target.checked);
+                                setHeartbeatOverride(true);
+                                setHeartbeatDirty(true);
+                              }}
+                            />
+                          </label>
+                          <label className="mt-4 flex items-center justify-between gap-3 text-xs font-semibold uppercase text-slate-500">
+                            <span>Active hours</span>
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-slate-300 text-slate-900"
+                              checked={heartbeatActiveHoursEnabled}
+                              disabled={heartbeatLoading || heartbeatSaving}
+                              onChange={(event) => {
+                                setHeartbeatActiveHoursEnabled(event.target.checked);
+                                setHeartbeatOverride(true);
+                                setHeartbeatDirty(true);
+                              }}
+                            />
+                          </label>
+                          {heartbeatActiveHoursEnabled ? (
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                              <input
+                                type="time"
+                                className="h-10 w-full rounded-2xl border border-slate-200 bg-white/80 px-3 text-xs text-slate-700 outline-none"
+                                value={heartbeatActiveStart}
+                                disabled={heartbeatLoading || heartbeatSaving}
                                 onChange={(event) => {
-                                  const value = event.target.value;
-                                    setWorkspaceFiles((prev) => ({
-                                      ...prev,
-                                      [name]: { ...prev[name], content: value },
-                                    }));
-                                    setWorkspaceDirty(true);
-                                  }}
-                                />
-                              ) : null}
+                                  setHeartbeatActiveStart(event.target.value);
+                                  setHeartbeatOverride(true);
+                                  setHeartbeatDirty(true);
+                                }}
+                              />
+                              <input
+                                type="time"
+                                className="h-10 w-full rounded-2xl border border-slate-200 bg-white/80 px-3 text-xs text-slate-700 outline-none"
+                                value={heartbeatActiveEnd}
+                                disabled={heartbeatLoading || heartbeatSaving}
+                                onChange={(event) => {
+                                  setHeartbeatActiveEnd(event.target.value);
+                                  setHeartbeatOverride(true);
+                                  setHeartbeatDirty(true);
+                                }}
+                              />
                             </div>
-                          );
-                        })}
-                      </div>
+                          ) : null}
+                          <label className="mt-4 flex flex-col gap-2 text-xs font-semibold uppercase text-slate-500">
+                            <span>ACK max chars</span>
+                            <input
+                              type="number"
+                              min={0}
+                              className="h-10 w-full rounded-2xl border border-slate-200 bg-white/80 px-3 text-xs text-slate-700 outline-none"
+                              value={heartbeatAckMaxChars}
+                              disabled={heartbeatLoading || heartbeatSaving}
+                              onChange={(event) => {
+                                setHeartbeatAckMaxChars(event.target.value);
+                                setHeartbeatOverride(true);
+                                setHeartbeatDirty(true);
+                              }}
+                            />
+                          </label>
+                          <div className="mt-4 flex items-center justify-between gap-2">
+                            <div className="text-xs text-slate-400">
+                              {heartbeatDirty ? "Remember to save changes." : "Up to date."}
+                            </div>
+                            <button
+                              className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold uppercase text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                              type="button"
+                              disabled={
+                                !projectId ||
+                                heartbeatLoading ||
+                                heartbeatSaving ||
+                                !heartbeatDirty
+                              }
+                              onClick={() => void saveHeartbeat()}
+                            >
+                              {heartbeatSaving ? "Saving..." : "Save heartbeat"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+
                     </div>
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4">
+                    <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-200 pt-4">
                       <div className="text-xs text-slate-400">
-                        {workspaceDirty ? "Remember to save your changes." : "Up to date."}
+                        {workspaceDirty ? "Auto-save on tab switch." : "Up to date."}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold uppercase text-slate-600"
-                          type="button"
-                          onClick={() => setSettingsOpen(false)}
-                        >
-                          Close
-                        </button>
-                        <button
-                          className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold uppercase text-white disabled:cursor-not-allowed disabled:bg-slate-400"
-                          type="button"
-                          disabled={
-                            !projectId ||
-                            workspaceLoading ||
-                            workspaceSaving ||
-                            !workspaceDirty
-                          }
-                          onClick={() => void saveWorkspaceFiles()}
-                        >
-                          {workspaceSaving ? "Saving..." : "Save changes"}
-                        </button>
-                      </div>
+                      <button
+                        className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold uppercase text-slate-600"
+                        type="button"
+                        onClick={() => setSettingsOpen(false)}
+                      >
+                        Close
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -449,8 +945,12 @@ export const AgentTile = ({
         )
       : null;
 
+  const resizeHandleClass = isSelected
+    ? "pointer-events-auto opacity-100"
+    : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100";
+
   return (
-    <div data-tile className="relative flex h-full w-full flex-col gap-3">
+    <div data-tile className="group relative flex h-full w-full flex-col gap-3">
       {settingsModal}
       <div className="flex flex-col gap-3 px-4 pt-4 pb-4">
         <div className="flex items-start justify-between gap-2">
@@ -550,11 +1050,10 @@ export const AgentTile = ({
             }}
             onKeyDown={(event) => {
               if (event.key !== "Enter" || event.shiftKey) return;
-              if (!isSelected) return;
+              event.preventDefault();
               if (!canSend || tile.status === "running") return;
               const message = tile.draft.trim();
               if (!message) return;
-              event.preventDefault();
               onSend(message);
             }}
             placeholder="type a message"
@@ -641,6 +1140,22 @@ export const AgentTile = ({
           </div>
         </div>
       ) : null}
+      <button
+        type="button"
+        aria-label="Resize tile"
+        className={`nodrag absolute -bottom-2 left-6 right-6 flex h-4 cursor-row-resize touch-none items-center justify-center transition-opacity ${resizeHandleClass}`}
+        onPointerDown={startHeightResize}
+      >
+        <span className="h-1.5 w-16 rounded-full bg-slate-300/90 shadow-sm" />
+      </button>
+      <button
+        type="button"
+        aria-label="Resize tile width"
+        className={`nodrag absolute -right-2 top-6 bottom-6 flex w-4 cursor-col-resize touch-none items-center justify-center transition-opacity ${resizeHandleClass}`}
+        onPointerDown={startWidthResize}
+      >
+        <span className="h-16 w-1.5 rounded-full bg-slate-300/90 shadow-sm" />
+      </button>
     </div>
   );
 };

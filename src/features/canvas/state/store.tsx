@@ -13,6 +13,7 @@ import {
 
 import type { Project, ProjectTile, ProjectsStore } from "@/lib/projects/types";
 import { CANVAS_BASE_ZOOM } from "@/lib/canvasDefaults";
+import { MAX_TILE_HEIGHT, MIN_TILE_SIZE } from "@/lib/canvasTileDefaults";
 import {
   createProjectTile as apiCreateProjectTile,
   createProject as apiCreateProject,
@@ -87,8 +88,20 @@ const initialState: CanvasState = {
 
 const buildSessionKey = (agentId: string) => `agent:${agentId}:main`;
 
+const clampTileHeight = (height: number) =>
+  Math.min(MAX_TILE_HEIGHT, Math.max(MIN_TILE_SIZE.height, height));
+
+const clampTileWidth = (width: number) =>
+  Math.max(MIN_TILE_SIZE.width, width);
+
+const clampTileSize = (size: TileSize): TileSize => ({
+  width: clampTileWidth(size.width),
+  height: clampTileHeight(size.height),
+});
+
 const createRuntimeTile = (tile: ProjectTile): AgentTile => ({
   ...tile,
+  size: clampTileSize(tile.size),
   sessionKey: tile.sessionKey || buildSessionKey(tile.agentId),
   model: tile.model ?? "openai-codex/gpt-5.2-codex",
   thinkingLevel: tile.thinkingLevel ?? "low",
@@ -206,7 +219,15 @@ const reducer = (state: CanvasState, action: Action): CanvasState => {
             ? {
                 ...project,
                 tiles: project.tiles.map((tile) =>
-                  tile.id === action.tileId ? { ...tile, ...action.patch } : tile
+                  tile.id === action.tileId
+                    ? {
+                        ...tile,
+                        ...action.patch,
+                        size: action.patch.size
+                          ? clampTileSize(action.patch.size)
+                          : tile.size,
+                      }
+                    : tile
                 ),
                 updatedAt: Date.now(),
               }

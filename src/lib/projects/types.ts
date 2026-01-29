@@ -113,3 +113,26 @@ export type ProjectTileWorkspaceFilesResult = {
 export type ProjectTileWorkspaceFilesUpdatePayload = {
   files: Array<{ name: string; content: string }>;
 };
+
+export type ProjectTileHeartbeatActiveHours = {
+  start: string;
+  end: string;
+};
+
+export type ProjectTileHeartbeat = {
+  every: string;
+  target: string;
+  includeReasoning: boolean;
+  ackMaxChars?: number | null;
+  activeHours?: ProjectTileHeartbeatActiveHours | null;
+};
+
+export type ProjectTileHeartbeatResult = {
+  heartbeat: ProjectTileHeartbeat;
+  hasOverride: boolean;
+};
+
+export type ProjectTileHeartbeatUpdatePayload = {
+  override: boolean;
+  heartbeat: ProjectTileHeartbeat;
+};

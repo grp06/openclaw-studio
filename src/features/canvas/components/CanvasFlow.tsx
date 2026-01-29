@@ -19,7 +19,6 @@ import type {
   TileSize,
 } from "@/features/canvas/state/store";
 import { AgentTileNode, type AgentTileNodeData } from "./AgentTileNode";
-import { MIN_TILE_SIZE } from "./AgentTile";
 
 type CanvasFlowProps = {
   tiles: AgentTile[];
@@ -65,6 +64,7 @@ const CanvasFlowInner = ({
     onUpdateTransform,
 }: CanvasFlowProps) => {
   const nodeTypes = useMemo(() => ({ agentTile: AgentTileNode }), []);
+  const resizeOverridesRef = useRef<Map<string, TileSize>>(new Map());
   const handlersRef = useRef({
     onMoveTile,
     onResizeTile,
@@ -104,20 +104,43 @@ const CanvasFlowInner = ({
     onNameShuffle,
   ]);
 
+  const [nodes, setNodes, onNodesChange] = useNodesState<TileNode>([]);
+
+  const updateNodeSize = useCallback(
+    (id: string, size: TileSize) => {
+      resizeOverridesRef.current.set(id, size);
+      setNodes((prevNodes) =>
+        prevNodes.map((node) =>
+          node.id === id ? { ...node, width: size.width, height: size.height } : node
+        )
+      );
+    },
+    [setNodes]
+  );
+
+  const commitNodeSize = useCallback(
+    (id: string, size: TileSize) => {
+      updateNodeSize(id, size);
+      handlersRef.current.onResizeTile(id, size);
+    },
+    [updateNodeSize]
+  );
+
   const nodesFromTiles = useMemo<TileNode[]>(
     () =>
       tiles.map((tile) => ({
         id: tile.id,
         type: "agentTile",
         position: tile.position,
-        width: MIN_TILE_SIZE.width,
+        width: tile.size.width,
         height: tile.size.height,
         dragHandle: "[data-drag-handle]",
         data: {
           tile,
           projectId,
           canSend,
-          onResize: (size) => handlersRef.current.onResizeTile(tile.id, size),
+          onResize: (size) => updateNodeSize(tile.id, size),
+          onResizeEnd: (size) => commitNodeSize(tile.id, size),
           onDelete: () => handlersRef.current.onDeleteTile(tile.id),
           onNameChange: (name) => handlersRef.current.onRenameTile(tile.id, name),
           onDraftChange: (value) => handlersRef.current.onDraftChange(tile.id, value),
@@ -131,13 +154,23 @@ const CanvasFlowInner = ({
           onNameShuffle: () => handlersRef.current.onNameShuffle(tile.id),
         },
       })),
-    [canSend, projectId, tiles]
+    [canSend, commitNodeSize, projectId, tiles, updateNodeSize]
   );
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(nodesFromTiles);
-
   useEffect(() => {
-    setNodes(nodesFromTiles);
+    setNodes((prevNodes) =>
+      nodesFromTiles.map((node) => {
+        const override = resizeOverridesRef.current.get(node.id);
+        if (!override) return node;
+        const widthDelta = Math.abs(override.width - (node.width ?? 0));
+        const heightDelta = Math.abs(override.height - (node.height ?? 0));
+        if (widthDelta < 0.5 && heightDelta < 0.5) {
+          resizeOverridesRef.current.delete(node.id);
+          return node;
+        }
+        return { ...node, width: override.width, height: override.height };
+      })
+    );
   }, [nodesFromTiles, setNodes]);
 
   const handleMove: OnMove = useCallback(

@@ -13,6 +13,8 @@ import type {
   ProjectTileRenameResult,
   ProjectTileUpdatePayload,
   ProjectTileUpdateResult,
+  ProjectTileHeartbeatResult,
+  ProjectTileHeartbeatUpdatePayload,
   ProjectTileWorkspaceFilesResult,
   ProjectTileWorkspaceFilesUpdatePayload,
   ProjectsStore,
@@ -129,6 +131,31 @@ export const updateProjectTileWorkspaceFiles = async (
 ): Promise<ProjectTileWorkspaceFilesResult> => {
   return fetchJson<ProjectTileWorkspaceFilesResult>(
     `/api/projects/${projectId}/tiles/${tileId}/workspace-files`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+};
+
+export const fetchProjectTileHeartbeat = async (
+  projectId: string,
+  tileId: string
+): Promise<ProjectTileHeartbeatResult> => {
+  return fetchJson<ProjectTileHeartbeatResult>(
+    `/api/projects/${projectId}/tiles/${tileId}/heartbeat`,
+    { cache: "no-store" }
+  );
+};
+
+export const updateProjectTileHeartbeat = async (
+  projectId: string,
+  tileId: string,
+  payload: ProjectTileHeartbeatUpdatePayload
+): Promise<ProjectTileHeartbeatResult> => {
+  return fetchJson<ProjectTileHeartbeatResult>(
+    `/api/projects/${projectId}/tiles/${tileId}/heartbeat`,
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },

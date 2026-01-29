@@ -6,25 +6,11 @@ import path from "node:path";
 import { logger } from "@/lib/logger";
 import { resolveAgentWorkspaceDir } from "@/lib/projects/agentWorkspace";
 import { WORKSPACE_FILE_NAMES, type WorkspaceFileName } from "@/lib/projects/workspaceFiles";
+import { isWorkspaceFileName, readWorkspaceFile } from "@/lib/projects/workspaceFiles.server";
 import type { ProjectTileWorkspaceFilesUpdatePayload } from "@/lib/projects/types";
 import { loadStore } from "../../../../store";
 
 export const runtime = "nodejs";
-
-const isWorkspaceFileName = (value: string): value is WorkspaceFileName =>
-  WORKSPACE_FILE_NAMES.includes(value as WorkspaceFileName);
-
-const readWorkspaceFile = (workspaceDir: string, name: WorkspaceFileName) => {
-  const filePath = path.join(workspaceDir, name);
-  if (!fs.existsSync(filePath)) {
-    return { name, content: "", exists: false };
-  }
-  const stat = fs.statSync(filePath);
-  if (!stat.isFile()) {
-    throw new Error(`${name} exists but is not a file.`);
-  }
-  return { name, content: fs.readFileSync(filePath, "utf8"), exists: true };
-};
 
 const resolveTile = async (
   params: Promise<{ projectId: string; tileId: string }>

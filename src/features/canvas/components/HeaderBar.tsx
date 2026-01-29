@@ -16,7 +16,7 @@ type HeaderBarProps = {
 const statusStyles: Record<GatewayStatus, string> = {
   disconnected: "bg-slate-200 text-slate-700",
   connecting: "bg-amber-200 text-amber-900",
-  connected: "bg-emerald-200 text-emerald-900",
+  connected: "bg-blue-200 text-blue-900",
 };
 
 export const HeaderBar = ({

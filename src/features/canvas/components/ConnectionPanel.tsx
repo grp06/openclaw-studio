@@ -23,7 +23,7 @@ const statusStyles: Record<GatewayStatus, { label: string; className: string }> 
     },
     connected: {
       label: "Connected",
-      className: "bg-emerald-200 text-emerald-900",
+      className: "bg-blue-200 text-blue-900",
     },
   };
 

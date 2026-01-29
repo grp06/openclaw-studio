@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // (ReactFlowInstance import removed)
 import { CanvasFlow } from "@/features/canvas/components/CanvasFlow";
 import { HeaderBar } from "@/features/canvas/components/HeaderBar";
-import { MIN_TILE_SIZE } from "@/features/canvas/components/AgentTile";
+import { MAX_TILE_HEIGHT, MIN_TILE_SIZE } from "@/lib/canvasTileDefaults";
 import { screenToWorld, worldToScreen } from "@/features/canvas/lib/transform";
 import { extractText } from "@/lib/text/extractText";
 import { extractThinking, formatThinkingMarkdown } from "@/lib/text/extractThinking";
@@ -43,6 +43,8 @@ const RESET_PROMPT_RE =
 const MESSAGE_ID_RE = /\s*\[message_id:[^\]]+\]\s*/gi;
 const UI_METADATA_PREFIX_RE =
   /^(?:Project path:|Workspace path:|A new session was started via \/new or \/reset)/i;
+const HEARTBEAT_PROMPT_RE = /^Read HEARTBEAT\.md if it exists\b/i;
+const HEARTBEAT_PATH_RE = /Heartbeat file path:/i;
 
 const stripUiMetadata = (text: string) => {
   if (!text) return text;
@@ -56,6 +58,12 @@ const stripUiMetadata = (text: string) => {
   return cleaned;
 };
 
+const isHeartbeatPrompt = (text: string) => {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return HEARTBEAT_PROMPT_RE.test(trimmed) || HEARTBEAT_PATH_RE.test(trimmed);
+};
 
 type ChatHistoryMessage = Record<string, unknown>;
 
@@ -78,6 +86,9 @@ const buildHistoryLines = (messages: ChatHistoryMessage[]) => {
       role === "assistant" ? formatThinkingMarkdown(extractThinking(message) ?? "") : "";
     if (!text && !thinking) continue;
     if (role === "user") {
+      if (text && isHeartbeatPrompt(text)) {
+        continue;
+      }
       if (text) {
         lines.push(`> ${text}`);
       }
@@ -211,7 +222,7 @@ const AgentCanvasPage = () => {
       const zoom = state.canvas.zoom;
 
       const effectiveSize = {
-        width: MIN_TILE_SIZE.width,
+        width: Math.max(tileSize.width, MIN_TILE_SIZE.width),
         height: Math.max(tileSize.height, MIN_TILE_SIZE.height),
       };
 
@@ -267,7 +278,7 @@ const AgentCanvasPage = () => {
             {
               x: tile.position.x,
               y: tile.position.y,
-              width: MIN_TILE_SIZE.width,
+              width: Math.max(tile.size.width, MIN_TILE_SIZE.width),
               height: Math.max(tile.size.height, MIN_TILE_SIZE.height),
             },
             24
@@ -906,8 +917,11 @@ const AgentCanvasPage = () => {
                 tileId: id,
                 patch: {
                   size: {
-                    width: MIN_TILE_SIZE.width,
-                    height: Math.max(size.height, MIN_TILE_SIZE.height),
+                    height: Math.min(
+                      MAX_TILE_HEIGHT,
+                      Math.max(size.height, MIN_TILE_SIZE.height)
+                    ),
+                    width: Math.max(size.width, MIN_TILE_SIZE.width),
                   },
                 },
               })

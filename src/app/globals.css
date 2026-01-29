@@ -147,26 +147,7 @@ body {
   border-color: transparent;
 }
 
-.tile-resize-handle {
-  height: 8px;
-  width: 112px;
-  border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.7);
-  background-color: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 6px 12px rgba(15, 23, 42, 0.18);
-  opacity: 0;
-  transition: opacity 160ms ease;
-  z-index: 2;
-}
 
-.react-flow__node:hover .tile-resize-handle,
-.react-flow__node.selected .tile-resize-handle {
-  opacity: 1;
-}
-
-.tile-resize-handle.react-flow__resize-control.bottom {
-  transform: translate(-50%, -100%);
-}
 
 .fade-up {
   animation: fadeUp 600ms ease-out both;
@@ -179,24 +160,24 @@ body {
 .agent-avatar-selected {
   animation: agentAvatarPulse 2.6s ease-in-out infinite;
   box-shadow:
-    0 0 0 0 rgba(59, 130, 246, 0.22),
+    0 0 0 0 rgba(34, 197, 94, 0.22),
     0 8px 18px rgba(15, 23, 42, 0.12);
 }
 
 @keyframes agentAvatarPulse {
   0% {
     box-shadow:
-      0 0 0 0 rgba(59, 130, 246, 0.22),
+      0 0 0 0 rgba(34, 197, 94, 0.22),
       0 8px 18px rgba(15, 23, 42, 0.12);
   }
   50% {
     box-shadow:
-      0 0 0 6px rgba(59, 130, 246, 0.14),
+      0 0 0 6px rgba(34, 197, 94, 0.14),
       0 10px 22px rgba(15, 23, 42, 0.16);
   }
   100% {
     box-shadow:
-      0 0 0 0 rgba(59, 130, 246, 0.22),
+      0 0 0 0 rgba(34, 197, 94, 0.22),
       0 8px 18px rgba(15, 23, 42, 0.12);
   }
 }
