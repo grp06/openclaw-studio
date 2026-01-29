@@ -9,7 +9,12 @@ import {
   createWorkspaceFilesState,
   isWorkspaceFileName,
 } from "@/lib/projects/workspaceFiles";
-import { provisionWorkspaceFiles, readWorkspaceFile } from "@/lib/projects/workspaceFiles.server";
+import {
+  provisionWorkspaceFiles,
+  readWorkspaceFile,
+  readWorkspaceFiles,
+  writeWorkspaceFiles,
+} from "@/lib/projects/workspaceFiles.server";
 
 const createTempDir = () =>
   fs.mkdtempSync(path.join(os.tmpdir(), "clawdbot-workspace-"));
@@ -64,5 +69,55 @@ describe("workspaceFiles", () => {
     const result = readWorkspaceFile(tempDir, "AGENTS.md");
 
     expect(result).toEqual({ name: "AGENTS.md", content: "", exists: false });
+  });
+
+  it("readWorkspaceFiles returns entries for all workspace files", () => {
+    tempDir = createTempDir();
+    provisionWorkspaceFiles(tempDir);
+
+    const files = readWorkspaceFiles(tempDir);
+
+    expect(files.map((file) => file.name)).toEqual([...WORKSPACE_FILE_NAMES]);
+    for (const file of files) {
+      expect(file.exists).toBe(true);
+    }
+  });
+
+  it("writeWorkspaceFiles updates content and returns updated list", () => {
+    tempDir = createTempDir();
+    provisionWorkspaceFiles(tempDir);
+
+    const result = writeWorkspaceFiles(tempDir, [
+      { name: "AGENTS.md", content: "Hello" },
+      { name: "USER.md", content: "Profile" },
+    ]);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const agents = result.files.find((file) => file.name === "AGENTS.md");
+      const user = result.files.find((file) => file.name === "USER.md");
+      expect(agents?.content).toBe("Hello");
+      expect(user?.content).toBe("Profile");
+    }
+  });
+
+  it("writeWorkspaceFiles rejects invalid names", () => {
+    tempDir = createTempDir();
+    provisionWorkspaceFiles(tempDir);
+
+    const result = writeWorkspaceFiles(tempDir, [{ name: "NOTES.md", content: "" }]);
+
+    expect(result).toEqual({ ok: false, error: "Invalid file name: NOTES.md" });
+  });
+
+  it("writeWorkspaceFiles rejects invalid content", () => {
+    tempDir = createTempDir();
+    provisionWorkspaceFiles(tempDir);
+
+    const result = writeWorkspaceFiles(tempDir, [
+      { name: "AGENTS.md", content: 123 },
+    ]);
+
+    expect(result).toEqual({ ok: false, error: "Invalid content for AGENTS.md." });
   });
 });

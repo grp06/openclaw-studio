@@ -48,6 +48,36 @@ export const readWorkspaceFile = (workspaceDir: string, name: WorkspaceFileName)
   return { name, content: fs.readFileSync(filePath, "utf8"), exists: true };
 };
 
+export const readWorkspaceFiles = (workspaceDir: string) =>
+  WORKSPACE_FILE_NAMES.map((name) => readWorkspaceFile(workspaceDir, name));
+
+export type WorkspaceFilesWriteResult =
+  | { ok: true; files: Array<{ name: WorkspaceFileName; content: string; exists: boolean }> }
+  | { ok: false; error: string };
+
+export const writeWorkspaceFiles = (
+  workspaceDir: string,
+  files: Array<{ name: string; content: unknown }>
+): WorkspaceFilesWriteResult => {
+  for (const entry of files) {
+    const name = typeof entry?.name === "string" ? entry.name.trim() : "";
+    if (!name || !isWorkspaceFileName(name)) {
+      return { ok: false, error: `Invalid file name: ${entry?.name ?? ""}` };
+    }
+    if (typeof entry.content !== "string") {
+      return { ok: false, error: `Invalid content for ${name}.` };
+    }
+  }
+
+  for (const entry of files) {
+    const name = entry.name as WorkspaceFileName;
+    const filePath = path.join(workspaceDir, name);
+    fs.writeFileSync(filePath, entry.content as string, "utf8");
+  }
+
+  return { ok: true, files: readWorkspaceFiles(workspaceDir) };
+};
+
 export const provisionWorkspaceFiles = (workspaceDir: string): { warnings: string[] } => {
   const warnings: string[] = [];
   ensureDir(workspaceDir);
