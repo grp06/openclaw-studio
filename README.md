@@ -1,67 +1,72 @@
-# moltbot-agent-ui
+# openclaw-studio
 
 ![Read Me Image](readme-image.png)
 
-Agent Canvas UI for Moltbot — a visual command center for multi-agent orchestration.
+When you run multiple agents, you need a place to see what's happening.
 
-The terminal is great for running a command. It’s not great at being a *home* for a team of agents: multiple threads of work, long-running tasks, shared context, files that evolve, and the constant question of “what’s running where?” This project is built on the belief that the future of multi-agent orchestration won’t live exclusively in the terminal — it needs a UI that makes complex work feel obvious.
+OpenClaw Studio is that place. It's the visual interface for the OpenClaw ecosystem—designed for people who coordinate agents across workspaces, track long-running tasks, and need to stay oriented when the work gets complex.
 
-`moltbot-agent-ui` is a local-first Next.js app that connects to the Moltbot gateway, streams tool output live, and keeps workspace state on disk. The goal is simple: make multi-agent work friendly and fun to use, while staying ultra powerful when you need to go deep.
+The terminal is good for single commands. But agents don't work in single commands. They work in threads. They share context. They produce files that evolve. They run in parallel, and you need to know what's running where.
 
-If you’re building or running agent workflows, this is the place to:
-- See work happening across agents at a glance
-- Keep context and artifacts (AGENTS.md, MEMORY.md, etc.) close to the work
-- Drive real projects forward without losing the plot
+OpenClaw Studio solves this. It's a local-first Next.js app that connects to your OpenClaw gateway, streams everything live, and keeps workspace state on disk. The interface is simple enough to feel obvious, powerful enough to handle real work.
 
-## Features
-- Multi-agent canvas for managing local workspaces
-- Live gateway connection for streaming tool output
-- Workspace file editor (AGENTS.md, MEMORY.md, etc.)
-- Optional Discord channel provisioning
-- Local JSON store (no external DB)
+## What it does
+
+- Shows you every agent and workspace at a glance
+- Keeps workspace files (AGENTS.md, MEMORY.md, etc.) right where you need them
+- Streams tool output in real time
+- Provisions Discord channels when you need them
+- Stores everything locally—no external database
+
+This is where multi-agent work happens.
 
 ## Requirements
-- Node.js (LTS recommended)
-- Moltbot installed and gateway running
-- git in PATH (used when creating workspaces)
-- macOS or Linux; Windows supported via WSL2
 
-## Quick start (from source)
+- Node.js (LTS recommended)
+- OpenClaw installed with gateway running
+- git in PATH
+- macOS or Linux; Windows via WSL2
+
+## Quick start
 ```bash
-git clone https://github.com/grp06/moltbot-agent-ui.git
-cd moltbot-agent-ui
+git clone https://github.com/grp06/openclaw-studio.git
+cd openclaw-studio
 npm install
 npm run dev
 ```
+
 Open http://localhost:3000
 
-Env overrides are optional. By default the UI reads config from `~/.clawdbot` or `~/.moltbot`.
+The UI reads config from `~/.openclaw` by default (falls back to `~/.moltbot` or `~/.clawdbot` if you're migrating).
 Only create a `.env` if you need to override those defaults:
 ```bash
 cp .env.example .env
 ```
 
 ## Configuration
-The UI reads gateway config from `moltbot.json` in your state directory. Defaults:
-- State dir: `~/.moltbot` (or `~/.clawdbot` if present)
-- Config: `~/.moltbot/moltbot.json` (or `~/.clawdbot/moltbot.json`)
+
+Your gateway config lives in `openclaw.json` in your state directory. Defaults:
+- State dir: `~/.openclaw`
+- Config: `~/.openclaw/openclaw.json`
 - Gateway URL: `ws://127.0.0.1:18789`
 
-Optional env overrides:
-- `MOLTBOT_STATE_DIR` / `CLAWDBOT_STATE_DIR`
-- `MOLTBOT_CONFIG_PATH` / `CLAWDBOT_CONFIG_PATH`
+Optional overrides:
+- `OPENCLAW_STATE_DIR`
+- `OPENCLAW_CONFIG_PATH`
 - `NEXT_PUBLIC_GATEWAY_URL`
 - `CLAWDBOT_DEFAULT_AGENT_ID`
 
-To use a dedicated state dir while developing:
+To use a dedicated state dir during development:
 ```bash
-MOLTBOT_STATE_DIR=~/moltbot-dev npm run dev
+OPENCLAW_STATE_DIR=~/openclaw-dev npm run dev
 ```
 
 ## Windows (WSL2)
-Run the UI and Moltbot inside the same WSL2 distro. Use the WSL shell to install Node, run the gateway, and start this UI. Access the UI in a Windows browser at http://localhost:3000.
+
+Run both OpenClaw Studio and OpenClaw inside the same WSL2 distro. Use the WSL shell for Node, the gateway, and the UI. Access it from Windows at http://localhost:3000.
 
 ## Scripts
+
 - `npm run dev`
 - `npm run build`
 - `npm run start`
@@ -71,9 +76,11 @@ Run the UI and Moltbot inside the same WSL2 distro. Use the WSL shell to install
 - `npm run e2e` (requires `npx playwright install`)
 
 ## Troubleshooting
-- **Missing config**: run the Moltbot onboarding (`moltbot onboard`) or set `MOLTBOT_CONFIG_PATH`.
-- **Gateway not reachable**: confirm the gateway is running and `NEXT_PUBLIC_GATEWAY_URL` matches the host/port.
-- **Auth errors**: check `gateway.auth.token` in your `moltbot.json`.
+
+- **Missing config**: Run `openclaw onboard` or set `OPENCLAW_CONFIG_PATH`
+- **Gateway unreachable**: Confirm the gateway is running and `NEXT_PUBLIC_GATEWAY_URL` matches
+- **Auth errors**: Check `gateway.auth.token` in `openclaw.json`
 
 ## Architecture
-See `ARCHITECTURE.md` for a deeper walkthrough of modules and data flow.
+
+See `ARCHITECTURE.md` for details on modules and data flow.
