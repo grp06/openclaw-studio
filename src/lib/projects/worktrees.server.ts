@@ -98,3 +98,19 @@ export const ensureAgentWorktree = (
 
   return { ok: true, warnings };
 };
+
+export const isWorktreeDirty = (worktreeDir: string): boolean => {
+  const result = spawnSync("git", ["status", "--porcelain"], {
+    cwd: worktreeDir,
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    const stderr = result.stderr?.trim();
+    throw new Error(
+      stderr
+        ? `git status failed in ${worktreeDir}: ${stderr}`
+        : `git status failed in ${worktreeDir}.`
+    );
+  }
+  return result.stdout.trim().length > 0;
+};

@@ -172,6 +172,43 @@ export const removeTileFromProject = (
   return { store: nextStore, removed };
 };
 
+export const removeTilesFromStore = (
+  store: ProjectsStore,
+  removals: Array<{ projectId: string; tileId: string }>,
+  now: number = Date.now()
+): { store: ProjectsStore; removed: boolean } => {
+  const targetsByProject = new Map<string, Set<string>>();
+  for (const entry of removals) {
+    const projectId = entry.projectId.trim();
+    const tileId = entry.tileId.trim();
+    if (!projectId || !tileId) continue;
+    const existing = targetsByProject.get(projectId);
+    if (existing) {
+      existing.add(tileId);
+    } else {
+      targetsByProject.set(projectId, new Set([tileId]));
+    }
+  }
+
+  let removed = false;
+  const nextStore = {
+    ...store,
+    version: STORE_VERSION,
+    projects: store.projects.map((project) => {
+      const targets = targetsByProject.get(project.id);
+      if (!targets) return project;
+      const nextTiles = project.tiles.filter((tile) => !targets.has(tile.id));
+      if (nextTiles.length === project.tiles.length) {
+        return project;
+      }
+      removed = true;
+      return { ...project, tiles: nextTiles, updatedAt: now };
+    }),
+  };
+
+  return { store: nextStore, removed };
+};
+
 export const archiveTileInProject = (
   store: ProjectsStore,
   projectId: string,

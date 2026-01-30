@@ -9,6 +9,7 @@ import {
   normalizeProjectsStore,
   removeProjectFromStore,
   removeTileFromProject,
+  removeTilesFromStore,
   restoreProjectInStore,
   restoreTileInProject,
   updateTileInProject,
@@ -173,6 +174,29 @@ describe("store mutations", () => {
     expect(result.removed).toBe(true);
     expect(updatedProject.tiles).toEqual([]);
     expect(updatedProject.updatedAt).toBe(now);
+  });
+
+  it("removes multiple tiles at once", () => {
+    const now = 999;
+    const project = makeProject("a");
+    const tileA = makeTile("1");
+    const tileB = makeTile("2");
+    const store: ProjectsStore = {
+      version: 3,
+      activeProjectId: project.id,
+      projects: [{ ...project, tiles: [tileA, tileB] }],
+    };
+    const result = removeTilesFromStore(
+      store,
+      [
+        { projectId: project.id, tileId: tileA.id },
+        { projectId: project.id, tileId: tileB.id },
+      ],
+      now
+    );
+    expect(result.removed).toBe(true);
+    expect(result.store.projects[0].tiles).toEqual([]);
+    expect(result.store.projects[0].updatedAt).toBe(now);
   });
 
   it("archives and restores a project", () => {

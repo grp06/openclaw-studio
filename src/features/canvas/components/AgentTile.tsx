@@ -1148,7 +1148,7 @@ export const AgentTile = ({
           <textarea
             ref={draftRef}
             rows={1}
-            className="max-h-28 flex-1 resize-none rounded-lg border border-border bg-card px-3 py-2 text-[11px] text-foreground outline-none"
+            className="max-h-28 flex-1 resize-none overflow-hidden rounded-lg border border-border bg-card px-3 py-2 text-[11px] text-foreground outline-none"
             value={tile.draft}
             onChange={(event) => {
               onDraftChange(event.target.value);

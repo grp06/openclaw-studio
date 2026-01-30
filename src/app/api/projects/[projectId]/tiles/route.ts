@@ -73,10 +73,9 @@ export async function POST(
     const { store, projectId: resolvedProjectId, project } = resolved;
 
     const tileId = randomUUID();
-    const projectSlug = path.basename(project.repoPath);
     let agentId = "";
     try {
-      agentId = generateAgentId({ projectSlug, tileName: name });
+      agentId = generateAgentId({ tileId });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Invalid agent name.";
       return NextResponse.json({ error: message }, { status: 400 });

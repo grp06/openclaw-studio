@@ -71,7 +71,7 @@ describe("projectFs", () => {
     const home = path.join(os.tmpdir(), "clawdbot-test-home");
     const env = { OPENCLAW_STATE_DIR: "~/state-test" } as unknown as NodeJS.ProcessEnv;
     expect(resolveAgentCanvasDir(env, () => home)).toBe(
-      path.join(home, "state-test", "agent-canvas")
+      path.join(home, "state-test", "openclaw-studio")
     );
   });
 
@@ -82,7 +82,7 @@ describe("projectFs", () => {
     fs.mkdirSync(openclawDir, { recursive: true });
     const env = {} as unknown as NodeJS.ProcessEnv;
     expect(resolveAgentCanvasDir(env, () => home)).toBe(
-      path.join(openclawDir, "agent-canvas")
+      path.join(openclawDir, "openclaw-studio")
     );
   });
 
@@ -118,7 +118,7 @@ describe("collectAgentIdsAndDeleteArtifacts", () => {
     const agentId = "agent-1";
     const workspaceDir = path.join(
       tempDir,
-      "agent-canvas",
+      "openclaw-studio",
       "worktrees",
       projectId,
       agentId

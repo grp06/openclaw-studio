@@ -29,7 +29,7 @@ describe("worktrees", () => {
     expect(resolved).toBe(
       path.join(
         "/tmp/openclaw-test-state",
-        "agent-canvas",
+        "openclaw-studio",
         "worktrees",
         "project-1",
         "agent-2"

@@ -77,7 +77,7 @@ const resolveConfigPathCandidates = (env = process.env, homedir = os.homedir) =>
   return candidates;
 };
 
-const resolveAgentCanvasDir = () => path.join(resolveStateDir(), "agent-canvas");
+const resolveAgentCanvasDir = () => path.join(resolveStateDir(), "openclaw-studio");
 
 const resolveAgentWorktreeDir = (projectId, agentId) =>
   path.join(resolveAgentCanvasDir(), "worktrees", projectId, agentId);
@@ -343,7 +343,7 @@ const saveClawdbotConfig = (configPath, config) => {
 
 const migrate = () => {
   const stateDir = resolveStateDir();
-  const storePath = path.join(stateDir, "agent-canvas", "projects.json");
+  const storePath = path.join(stateDir, "openclaw-studio", "projects.json");
   if (!fs.existsSync(storePath)) {
     console.error(`Missing projects store at ${storePath}.`);
     process.exit(1);

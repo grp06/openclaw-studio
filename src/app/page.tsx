@@ -24,7 +24,11 @@ import {
   getAgentSummaryPatch,
   getChatSummaryPatch,
 } from "@/features/canvas/state/summary";
-import { createProjectDiscordChannel } from "@/lib/projects/client";
+import {
+  createProjectDiscordChannel,
+  fetchProjectCleanupPreview,
+  runProjectCleanup,
+} from "@/lib/projects/client";
 import { createRandomAgentName, normalizeAgentName } from "@/lib/names/agentNames";
 import { buildAgentInstruction } from "@/lib/projects/message";
 import { filterArchivedItems } from "@/lib/projects/archive";
@@ -206,6 +210,10 @@ const AgentCanvasPage = () => {
   const visibleProjects = useMemo(
     () => filterArchivedItems(state.projects, showArchived),
     [state.projects, showArchived]
+  );
+  const hasArchivedTiles = useMemo(
+    () => state.projects.some((entry) => entry.tiles.some((tile) => tile.archivedAt)),
+    [state.projects]
   );
   const project = useMemo(() => {
     if (activeProject && (showArchived || !activeProject.archivedAt)) {
@@ -1039,6 +1047,31 @@ const AgentCanvasPage = () => {
     }
   }, [deleteProject, project, restoreProject]);
 
+  const handleCleanupArchived = useCallback(async () => {
+    try {
+      const preview = await fetchProjectCleanupPreview();
+      if (preview.items.length === 0) {
+        window.alert("No archived agents to clean.");
+        return;
+      }
+      const confirmation = window.prompt(
+        `Type CLEAN ARCHIVED to remove ${preview.items.length} archived agents.`
+      );
+      if (confirmation !== "CLEAN ARCHIVED") return;
+      const result = await runProjectCleanup({
+        tileIds: preview.items.map((item) => item.tileId),
+      });
+      dispatch({ type: "loadStore", store: result.store });
+      if (result.warnings.length) {
+        window.alert(result.warnings.join("\n"));
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to clean archived agents.";
+      window.alert(message);
+    }
+  }, [dispatch]);
+
   const handleCreateDiscordChannel = useCallback(async () => {
     if (!project || project.archivedAt) return;
     if (!state.selectedTileId) {
@@ -1227,6 +1260,8 @@ const AgentCanvasPage = () => {
             canCreateDiscordChannel={Boolean(
               project && tiles.length > 0 && !project.archivedAt
             )}
+            onCleanupArchived={handleCleanupArchived}
+            canCleanupArchived={hasArchivedTiles}
           />
         </div>
 
