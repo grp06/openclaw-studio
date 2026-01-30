@@ -1249,6 +1249,12 @@ const AgentCanvasPage = () => {
                       className="h-11 rounded-lg border border-input bg-background px-4 text-sm text-foreground outline-none"
                       value={projectName}
                       onChange={(event) => setProjectName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          handleProjectCreate();
+                        }
+                      }}
                     />
                   </label>
                 </div>
