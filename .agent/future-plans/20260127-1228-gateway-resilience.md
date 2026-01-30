@@ -1,5 +1,0 @@
-GatewayClient (src/lib/gateway/GatewayClient.ts) performs a one-shot connect and the hook in src/lib/gateway/useGatewayConnection.ts only auto-connects once, so any transient gateway failure requires a manual refresh. The UI in src/app/page.tsx only gates actions on the connection status and does not provide a structured retry UX.
-
-Implement a reconnect strategy with exponential backoff and jitter, add a retrying status and lastError fields, and respect GatewayResponseError.retryAfterMs when present. Update HeaderBar or page UI to show connection state, last error, and a retry or cancel action; optionally persist gatewayUrl/token edits in local storage or via a small API endpoint so users do not retype on reload.
-
-Acceptance criteria: on socket close, the client retries with backoff until connected or explicitly disconnected; the UI displays next retry timing and lets the user cancel; tests with fake timers validate backoff and stop behavior. Open question: should auto-reconnect be disabled after auth failures, and how do we detect that from gateway responses.

@@ -1,6 +1,17 @@
 # moltbot-agent-ui
 
-Agent Canvas UI for Moltbot. This is a local-first Next.js UI that talks directly to the Moltbot gateway and stores workspace state on disk.
+![Read Me Image](readme-image.png)
+
+Agent Canvas UI for Moltbot — a visual command center for multi-agent orchestration.
+
+The terminal is great for running a command. It’s not great at being a *home* for a team of agents: multiple threads of work, long-running tasks, shared context, files that evolve, and the constant question of “what’s running where?” This project is built on the belief that the future of multi-agent orchestration won’t live exclusively in the terminal — it needs a UI that makes complex work feel obvious.
+
+`moltbot-agent-ui` is a local-first Next.js app that connects to the Moltbot gateway, streams tool output live, and keeps workspace state on disk. The goal is simple: make multi-agent work friendly and fun to use, while staying ultra powerful when you need to go deep.
+
+If you’re building or running agent workflows, this is the place to:
+- See work happening across agents at a glance
+- Keep context and artifacts (AGENTS.md, MEMORY.md, etc.) close to the work
+- Drive real projects forward without losing the plot
 
 ## Features
 - Multi-agent canvas for managing local workspaces
