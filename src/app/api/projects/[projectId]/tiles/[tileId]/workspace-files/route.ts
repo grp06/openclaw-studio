@@ -4,7 +4,6 @@ import fs from "node:fs";
 
 import { logger } from "@/lib/logger";
 import { resolveAgentWorkspaceDir } from "@/lib/projects/agentWorkspace";
-import { WORKSPACE_FILE_NAMES } from "@/lib/projects/workspaceFiles";
 import {
   readWorkspaceFiles,
   writeWorkspaceFiles,

@@ -112,7 +112,7 @@ const CanvasFlowInner = ({
   const updateNodeSize = useCallback(
     (id: string, size: TileSize) => {
       resizeOverridesRef.current.set(id, size);
-      setNodes((prevNodes) =>
+      setNodes(() =>
         prevNodes.map((node) =>
           node.id === id ? { ...node, width: size.width, height: size.height } : node
         )
@@ -162,7 +162,7 @@ const CanvasFlowInner = ({
   );
 
   useEffect(() => {
-    setNodes((prevNodes) =>
+    setNodes(() =>
       nodesFromTiles.map((node) => {
         const override = resizeOverridesRef.current.get(node.id);
         if (!override) return node;
