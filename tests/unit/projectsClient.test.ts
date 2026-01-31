@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createOrOpenProject, updateProject, updateProjectTile } from "@/lib/projects/client";
+import {
+  createOrOpenProject,
+  fetchProjectCleanupPreview,
+  runProjectCleanup,
+  updateProject,
+  updateProjectTile,
+} from "@/lib/projects/client";
 import { fetchJson } from "@/lib/http";
 
 vi.mock("@/lib/http", () => ({
@@ -68,6 +74,31 @@ describe("projects client", () => {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ archivedAt: null }),
+    });
+  });
+
+  it("fetchProjectCleanupPreview calls cleanup endpoint", async () => {
+    vi.mocked(fetchJson).mockResolvedValue({ items: [] });
+
+    await fetchProjectCleanupPreview();
+
+    expect(fetchJson).toHaveBeenCalledWith("/api/projects/cleanup", {
+      cache: "no-store",
+    });
+  });
+
+  it("runProjectCleanup posts payload", async () => {
+    vi.mocked(fetchJson).mockResolvedValue({
+      store: { version: 3, activeProjectId: null, projects: [] },
+      warnings: [],
+    });
+
+    await runProjectCleanup({ tileIds: ["tile-1"] });
+
+    expect(fetchJson).toHaveBeenCalledWith("/api/projects/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tileIds: ["tile-1"] }),
     });
   });
 });

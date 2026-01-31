@@ -15,6 +15,8 @@ type HeaderBarProps = {
   onNewAgent: () => void;
   onCreateDiscordChannel: () => void;
   canCreateDiscordChannel: boolean;
+  onCleanupArchived: () => void;
+  canCleanupArchived: boolean;
 };
 
 const statusDotStyles: Record<GatewayStatus, string> = {
@@ -43,6 +45,8 @@ export const HeaderBar = ({
   onNewAgent,
   onCreateDiscordChannel,
   canCreateDiscordChannel,
+  onCleanupArchived,
+  canCleanupArchived,
 }: HeaderBarProps) => {
   const hasProjects = projects.length > 0;
   return (
@@ -152,6 +156,20 @@ export const HeaderBar = ({
                   disabled={!activeProjectId}
                 >
                   {activeProjectArchived ? "Restore Workspace" : "Archive Workspace"}
+                </button>
+                <button
+                  className="mt-1 flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-semibold text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  type="button"
+                  onClick={(event) => {
+                    onCleanupArchived();
+                    const details = event.currentTarget.closest(
+                      "details"
+                    ) as HTMLDetailsElement | null;
+                    if (details) details.open = false;
+                  }}
+                  disabled={!canCleanupArchived}
+                >
+                  Clean Archived Agents
                 </button>
                 {canCreateDiscordChannel ? (
                   <button

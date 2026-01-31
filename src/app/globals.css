@@ -229,6 +229,31 @@ textarea:focus::-webkit-scrollbar {
   border-color: transparent;
 }
 
+.react-flow__attribution,
+.xy-flow__attribution {
+  display: none;
+}
+
+.dark .react-flow__controls,
+.dark .react-flow__minimap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.dark .react-flow__controls-button {
+  background: var(--card);
+  color: var(--foreground);
+  border-color: var(--border);
+}
+
+.dark .react-flow__controls-button:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
 .fade-up {
   animation: fadeUp 600ms ease-out both;
 }
@@ -333,6 +358,25 @@ textarea:focus::-webkit-scrollbar {
   --shadow-lg: 0px 1px 3px 0px hsl(0 0% 0% / 0.10), 0px 4px 6px -1px hsl(0 0% 0% / 0.10);
   --shadow-xl: 0px 1px 3px 0px hsl(0 0% 0% / 0.10), 0px 8px 10px -1px hsl(0 0% 0% / 0.10);
   --shadow-2xl: 0px 1px 3px 0px hsl(0 0% 0% / 0.25);
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-background-color-hover: var(--accent);
+  --xy-controls-button-color: var(--foreground);
+  --xy-controls-button-color-hover: var(--foreground);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-box-shadow: var(--shadow-sm);
+  --xy-minimap-background-color: var(--card);
+  --xy-minimap-mask-background-color: color-mix(
+    in oklch,
+    var(--background) 70%,
+    transparent
+  );
+  --xy-minimap-mask-stroke-color: var(--border);
+  --xy-minimap-node-background-color: color-mix(
+    in oklch,
+    var(--accent) 60%,
+    var(--background)
+  );
+  --xy-minimap-node-stroke-color: var(--border);
 }
 
 @layer base {

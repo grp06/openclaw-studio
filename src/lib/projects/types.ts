@@ -84,6 +84,32 @@ export type ProjectTileDeleteResult = {
   warnings: string[];
 };
 
+export type ProjectCleanupPreviewItem = {
+  projectId: string;
+  projectName: string;
+  tileId: string;
+  tileName: string;
+  agentId: string;
+  workspacePath: string;
+  archivedAt: number;
+  workspaceExists: boolean;
+  agentStateExists: boolean;
+  worktreeDirty: boolean;
+};
+
+export type ProjectCleanupPreviewResult = {
+  items: ProjectCleanupPreviewItem[];
+};
+
+export type ProjectCleanupRequest = {
+  tileIds?: string[];
+};
+
+export type ProjectCleanupResult = {
+  store: ProjectsStore;
+  warnings: string[];
+};
+
 export type ProjectTileUpdatePayload = {
   name?: string;
   avatarSeed?: string | null;

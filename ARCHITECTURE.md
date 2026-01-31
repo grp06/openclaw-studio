@@ -27,7 +27,7 @@ This keeps feature cohesion high while preserving a clear client/server boundary
 
 ## Main modules / bounded contexts
 - **Canvas UI** (`src/features/canvas`): React Flow canvas, tiles, editor UI, local in-memory state + actions. Agent tiles render a status-first summary and latest-update preview driven by gateway events + summary snapshots (`src/features/canvas/state/summary.ts`). Full transcripts load only on explicit “Load history” actions.
-- **Projects** (`src/lib/projects`, `src/app/api/projects`): project/tile models, store persistence, shared store normalization and mutation helpers in `src/app/api/projects/store.ts`, worktree provisioning (`src/lib/projects/worktrees.server.ts`), workspace files, heartbeat settings, shared project/tile resolution plus API response helpers in `src/lib/projects/resolve.server.ts` (including param-based helpers that load the store), shared sessionKey helpers in `src/lib/projects/sessionKey.ts`, shared workspace file helpers in `src/lib/projects/workspaceFiles.ts`, server-side workspace file read/write helpers in `src/lib/projects/workspaceFiles.server.ts`, agent-canvas path helper in `src/lib/projects/agentWorkspace.ts`, server-side filesystem helpers (`src/lib/projects/fs.server.ts`) for explicit cleanup operations. Workspace create/open is handled by `POST /api/projects` in `src/app/api/projects/route.ts` using name-or-path payloads, with a single client entry point in `src/lib/projects/client.ts`. Tiles store a worktree-backed `workspacePath` and support archive/restore with `archivedAt`.
+- **Projects** (`src/lib/projects`, `src/app/api/projects`): project/tile models, store persistence, shared store normalization and mutation helpers in `src/app/api/projects/store.ts`, worktree provisioning (`src/lib/projects/worktrees.server.ts`), workspace files, heartbeat settings, shared project/tile resolution plus API response helpers in `src/lib/projects/resolve.server.ts` (including param-based helpers that load the store), shared sessionKey helpers in `src/lib/projects/sessionKey.ts`, shared workspace file helpers in `src/lib/projects/workspaceFiles.ts`, server-side workspace file read/write helpers in `src/lib/projects/workspaceFiles.server.ts`, studio state-dir helper in `src/lib/projects/agentWorkspace.ts`, server-side filesystem helpers (`src/lib/projects/fs.server.ts`) for explicit cleanup operations. Workspace create/open is handled by `POST /api/projects` in `src/app/api/projects/route.ts` using name-or-path payloads, with a single client entry point in `src/lib/projects/client.ts`. Tiles store a worktree-backed `workspacePath` and support archive/restore with `archivedAt`. Archived tiles are hard-deleted via `POST /api/projects/cleanup` after previewing via `GET /api/projects/cleanup`, which removes worktrees, agent state, and agent config entries.
 - **Gateway** (`src/lib/gateway`): WebSocket client for agent runtime (frames, connect, request/response). The OpenClaw control UI client is vendored in `src/lib/gateway/openclaw/GatewayBrowserClient.ts` with a sync script at `scripts/sync-openclaw-gateway-client.ts`.
 - **OpenClaw config + paths** (`src/lib/clawdbot`): read/write openclaw.json (with legacy fallback), shared agent list helpers (used by heartbeat routes), shared config update helper for routes, heartbeat defaults, consolidated state/config/.env path resolution with `OPENCLAW_*` env overrides (`src/lib/clawdbot/paths.ts`).
 - **Discord integration** (`src/lib/discord`, API route): channel provisioning and config binding.
@@ -44,7 +44,7 @@ This keeps feature cohesion high while preserving a clear client/server boundary
 
 ## Data flow & key boundaries
 ### 1) Project + tile state
-- **Source of truth**: JSON store on disk at `~/.openclaw/agent-canvas/projects.json` (legacy fallback to `~/.moltbot` or `~/.clawdbot`).
+- **Source of truth**: JSON store on disk at `~/.openclaw/openclaw-studio/projects.json` (legacy fallback to `~/.moltbot` or `~/.clawdbot`).
 - **Server boundary**: `src/app/api/projects/*` handles validation, persistence, and side effects.
 - **Client boundary**: `AgentCanvasProvider` loads store on startup, caches in memory, and persists via API.
 
@@ -99,7 +99,7 @@ Flow:
 - **Node runtime for API routes**: required for filesystem access; trade-off is Node-only server runtime.
 - **Per-agent worktrees**: isolates agent file edits and git state; trade-off is additional worktree management and disk usage.
 - **Event-driven summaries + on-demand history**: keeps the dashboard lightweight; trade-off is history not being available until requested.
-- **Archive-first deletes**: preserves local state and worktrees by default; trade-off is explicit cleanup as a separate operation.
+- **Archive-first deletes**: preserves local state and worktrees by default; trade-off is explicit cleanup as a separate operation, now handled by `GET/POST /api/projects/cleanup`.
 
 ## Mermaid diagrams
 ### C4 Level 1 (System Context)

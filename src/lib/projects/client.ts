@@ -4,6 +4,9 @@ import type {
   ProjectDiscordChannelCreateResult,
   ProjectCreateOrOpenPayload,
   ProjectCreateOrOpenResult,
+  ProjectCleanupPreviewResult,
+  ProjectCleanupRequest,
+  ProjectCleanupResult,
   ProjectUpdatePayload,
   ProjectUpdateResult,
   ProjectTileCreatePayload,
@@ -53,6 +56,22 @@ export const updateProject = async (
 ): Promise<ProjectUpdateResult> => {
   return fetchJson<ProjectUpdateResult>(`/api/projects/${projectId}`, {
     method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+};
+
+export const fetchProjectCleanupPreview = async (): Promise<ProjectCleanupPreviewResult> => {
+  return fetchJson<ProjectCleanupPreviewResult>("/api/projects/cleanup", {
+    cache: "no-store",
+  });
+};
+
+export const runProjectCleanup = async (
+  payload: ProjectCleanupRequest
+): Promise<ProjectCleanupResult> => {
+  return fetchJson<ProjectCleanupResult>("/api/projects/cleanup", {
+    method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
