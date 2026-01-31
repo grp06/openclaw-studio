@@ -5,6 +5,8 @@ import type { ProjectTileUpdatePayload } from "@/lib/projects/types";
 import { resolveAgentWorktreeDir } from "@/lib/projects/worktrees.server";
 import { resolveProjectTileFromParams } from "@/lib/projects/resolve.server";
 import {
+  removeAgentEntry,
+  rewriteBindingsForRemovedAgent,
   updateClawdbotConfig,
   upsertAgentEntry,
 } from "@/lib/clawdbot/config";
@@ -25,7 +27,7 @@ export async function DELETE(
     if (!resolved.ok) {
       return resolved.response;
     }
-    const { store, projectId: resolvedProjectId, tileId: resolvedTileId } = resolved;
+    const { store, projectId: resolvedProjectId, tileId: resolvedTileId, tile } = resolved;
 
     const { store: nextStore, updated } = archiveTileInProject(
       store,
@@ -36,7 +38,16 @@ export async function DELETE(
       return NextResponse.json({ error: "Tile not found." }, { status: 404 });
     }
     saveStore(nextStore);
-    return NextResponse.json({ store: nextStore, warnings: [] });
+
+    const warnings: string[] = [];
+    const { warnings: configWarnings } = updateClawdbotConfig((config) => {
+      const removed = removeAgentEntry(config, tile.agentId);
+      const rewritten = rewriteBindingsForRemovedAgent(config, tile.agentId, "main");
+      return removed || rewritten;
+    });
+    warnings.push(...configWarnings);
+
+    return NextResponse.json({ store: nextStore, warnings });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to archive tile.";
     logger.error(message);

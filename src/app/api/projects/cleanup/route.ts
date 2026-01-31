@@ -13,7 +13,11 @@ import { loadStore, removeTilesFromStore, saveStore } from "@/app/api/projects/s
 import { selectArchivedTilesForCleanup } from "@/lib/projects/cleanup";
 import { deleteDirIfExists, resolveAgentStateDir } from "@/lib/projects/fs.server";
 import { isWorktreeDirty } from "@/lib/projects/worktrees.server";
-import { removeAgentEntry, updateClawdbotConfig } from "@/lib/clawdbot/config";
+import {
+  removeAgentEntry,
+  rewriteBindingsForRemovedAgent,
+  updateClawdbotConfig,
+} from "@/lib/clawdbot/config";
 
 export const runtime = "nodejs";
 
@@ -141,9 +145,8 @@ export async function POST(request: Request) {
     const { warnings: configWarnings } = updateClawdbotConfig((config) => {
       let changed = false;
       for (const agentId of agentIds) {
-        if (removeAgentEntry(config, agentId)) {
-          changed = true;
-        }
+        if (removeAgentEntry(config, agentId)) changed = true;
+        if (rewriteBindingsForRemovedAgent(config, agentId, "main")) changed = true;
       }
       return changed;
     });

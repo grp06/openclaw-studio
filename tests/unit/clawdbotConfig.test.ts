@@ -6,6 +6,8 @@ import path from "node:path";
 
 import {
   readAgentList,
+  removeAgentEntry,
+  rewriteBindingsForRemovedAgent,
   updateClawdbotConfig,
   writeAgentList,
   type AgentEntry,
@@ -96,5 +98,68 @@ describe("updateClawdbotConfig", () => {
     expect(result.warnings).toEqual([
       "Agent config not updated: Failed to update config.",
     ]);
+  });
+});
+
+describe("removeAgentEntry", () => {
+  it("removes agent from list and returns true", () => {
+    const config: Record<string, unknown> = {
+      agents: {
+        list: [
+          { id: "main", name: "Main", workspace: "/main" },
+          { id: "proj-1", name: "Proj", workspace: "/proj" },
+        ],
+      },
+    };
+    expect(removeAgentEntry(config, "proj-1")).toBe(true);
+    expect(readAgentList(config)).toEqual([
+      { id: "main", name: "Main", workspace: "/main" },
+    ]);
+  });
+
+  it("returns false when agent not in list", () => {
+    const config: Record<string, unknown> = {
+      agents: { list: [{ id: "main" }] },
+    };
+    expect(removeAgentEntry(config, "other")).toBe(false);
+    expect(readAgentList(config)).toEqual([{ id: "main" }]);
+  });
+});
+
+describe("rewriteBindingsForRemovedAgent", () => {
+  it("rewrites bindings for removed agent to main", () => {
+    const config: Record<string, unknown> = {
+      bindings: [
+        { agentId: "main", match: { channel: "whatsapp" } },
+        { agentId: "proj-1", match: { channel: "discord", peer: { kind: "channel", id: "123" } } },
+        { agentId: "proj-1", match: { channel: "telegram" } },
+      ],
+    };
+    expect(rewriteBindingsForRemovedAgent(config, "proj-1")).toBe(true);
+    const bindings = config.bindings as Array<Record<string, unknown>>;
+    expect(bindings[0].agentId).toBe("main");
+    expect(bindings[1].agentId).toBe("main");
+    expect(bindings[2].agentId).toBe("main");
+  });
+
+  it("leaves other bindings unchanged", () => {
+    const config: Record<string, unknown> = {
+      bindings: [
+        { agentId: "main", match: { channel: "whatsapp" } },
+        { agentId: "other", match: { channel: "telegram" } },
+      ],
+    };
+    expect(rewriteBindingsForRemovedAgent(config, "proj-1")).toBe(false);
+    const bindings = config.bindings as Array<Record<string, unknown>>;
+    expect(bindings[0].agentId).toBe("main");
+    expect(bindings[1].agentId).toBe("other");
+  });
+
+  it("uses custom fallback when provided", () => {
+    const config: Record<string, unknown> = {
+      bindings: [{ agentId: "proj-1", match: { channel: "discord" } }],
+    };
+    rewriteBindingsForRemovedAgent(config, "proj-1", "fallback");
+    expect((config.bindings as Array<Record<string, unknown>>)[0].agentId).toBe("fallback");
   });
 });

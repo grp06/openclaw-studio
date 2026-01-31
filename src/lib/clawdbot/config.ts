@@ -118,6 +118,27 @@ export const removeAgentEntry = (config: ClawdbotConfig, agentId: string): boole
   return true;
 };
 
+/** Rewrite bindings that pointed at agentId to "main" so routing falls back. */
+export const rewriteBindingsForRemovedAgent = (
+  config: ClawdbotConfig,
+  agentId: string,
+  fallbackAgentId = "main"
+): boolean => {
+  const bindings = Array.isArray(config.bindings) ? config.bindings : [];
+  let changed = false;
+  const next = bindings.map((binding) => {
+    if (!binding || typeof binding !== "object") return binding;
+    const entry = binding as Record<string, unknown>;
+    if (entry.agentId !== agentId) return binding;
+    changed = true;
+    return { ...entry, agentId: fallbackAgentId };
+  });
+  if (changed) {
+    config.bindings = next;
+  }
+  return changed;
+};
+
 export const updateClawdbotConfig = (
   updater: (config: Record<string, unknown>) => boolean
 ): { warnings: string[] } => {
