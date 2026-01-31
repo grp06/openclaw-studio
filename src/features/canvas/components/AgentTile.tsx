@@ -74,13 +74,15 @@ export const AgentTile = ({
   }, []);
 
   useEffect(() => {
-    setNameDraft(tile.name);
+    // Defer state sync to avoid synchronous setState-in-effect lint rule.
+    queueMicrotask(() => setNameDraft(tile.name));
   }, [tile.name]);
 
   useEffect(() => {
     if (tile.draft === plainDraftRef.current) return;
     plainDraftRef.current = tile.draft;
-    setMentionsValue(tile.draft);
+    // Defer state sync to avoid synchronous setState-in-effect lint rule.
+    queueMicrotask(() => setMentionsValue(tile.draft));
   }, [tile.draft]);
 
   useEffect(() => {

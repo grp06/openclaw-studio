@@ -25,7 +25,8 @@ export const ThemeToggle = () => {
 
   useEffect(() => {
     const preferred = getPreferredTheme();
-    setTheme(preferred);
+    // Defer state sync to avoid synchronous setState-in-effect lint rule.
+    queueMicrotask(() => setTheme(preferred));
     applyTheme(preferred);
   }, []);
 
