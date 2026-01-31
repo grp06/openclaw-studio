@@ -80,3 +80,49 @@ test("create workspace form submits on Return key", async ({ page }) => {
     createdProject.id
   );
 });
+
+test("Create Workspace form does not submit on Enter during IME composition", async ({
+  page,
+}) => {
+  await page.route("**/api/projects", async (route, request) => {
+    if (request.method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        version: 3,
+        activeProjectId: null,
+        projects: [],
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.getByText("Create a workspace to begin.")).toBeVisible();
+  await page
+    .locator("details")
+    .filter({ hasText: "New Workspace" })
+    .locator("summary")
+    .click();
+  await page.getByRole("button", { name: "New Workspace" }).click();
+
+  const nameInput = page.getByLabel("Workspace name");
+  await expect(nameInput).toBeVisible();
+  await nameInput.fill("未完成");
+  await nameInput.evaluate((el) => {
+    el.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+      })
+    );
+  });
+
+  await expect(nameInput).toBeVisible();
+  await expect(nameInput).toHaveValue("未完成");
+  await expect(page.getByRole("button", { name: "Create Workspace" })).toBeVisible();
+});
