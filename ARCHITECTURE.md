@@ -44,7 +44,7 @@ This keeps feature cohesion high while preserving a clear client/server boundary
 
 ## Data flow & key boundaries
 ### 1) Project + tile state
-- **Source of truth**: JSON store on disk at `~/.openclaw/openclaw-studio/projects.json` with workspace settings in `~/.openclaw/openclaw-studio/settings.json` (legacy fallback to `~/.moltbot` or `~/.clawdbot`). When no workspace is saved, Studio defaults to `~/.clawdbot/workspace` (created if missing). Legacy multi-workspace data is preserved in `~/.openclaw/openclaw-studio/legacy-projects.json` when single-workspace normalization runs.
+- **Source of truth**: JSON store on disk at `~/.openclaw/openclaw-studio/projects.json` with workspace settings in `~/.openclaw/openclaw-studio/settings.json` (legacy fallback to `~/.moltbot` or `~/.clawdbot`). When no workspace is saved, Studio defaults to `<state dir>/workspace` (created if missing), where the state dir is resolved by `resolveStateDir` (env override or first existing of `~/.openclaw`, `~/.clawdbot`, `~/.moltbot`). If `OPENCLAW_PROFILE` is set and not `default`, the folder becomes `workspace-<profile>`. Legacy multi-workspace data is preserved in `~/.openclaw/openclaw-studio/legacy-projects.json` when single-workspace normalization runs.
 - **Server boundary**: `src/app/api/projects/*` handles validation, persistence, and side effects.
 - **Client boundary**: `AgentCanvasProvider` loads store on startup, caches in memory, and persists via API.
 
@@ -81,7 +81,7 @@ Flow:
 - Updates `openclaw.json` bindings and channel config.
 
 ## Cross-cutting concerns
-- **Configuration**: `src/lib/env` validates env via zod; `lib/clawdbot/paths.ts` resolves config path and state dirs, honoring `OPENCLAW_STATE_DIR`/`OPENCLAW_CONFIG_PATH` and legacy fallbacks.
+- **Configuration**: `src/lib/env` validates env via zod; `lib/clawdbot/paths.ts` resolves config path and state dirs, honoring `OPENCLAW_STATE_DIR`/`OPENCLAW_CONFIG_PATH` and legacy fallbacks. Default workspace fallback paths are derived from `resolveStateDir` with `OPENCLAW_PROFILE` suffixing in `src/lib/clawdbot/resolveDefaultAgent.ts`.
 - **Logging**: `src/lib/logger` (console wrappers) used in API routes and gateway client.
 - **Error handling**:
   - API routes return JSON `{ error }` with appropriate status.
