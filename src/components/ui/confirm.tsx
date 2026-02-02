@@ -27,7 +27,10 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
 
   const confirm = React.useCallback((options: ConfirmOptions) => {
     return new Promise<boolean>((resolve) => {
-      setRequest({ id: crypto.randomUUID(), options, resolve });
+      setRequest((prev) => {
+        if (prev) prev.resolve(false);
+        return { id: crypto.randomUUID(), options, resolve };
+      });
     });
   }, []);
 
