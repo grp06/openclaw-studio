@@ -50,14 +50,6 @@ cp .env.example .env
 
 OpenClaw Studio operates in a single workspace path. On first launch it defaults to `~/.clawdbot/workspace` (created if missing). Use **Change Default Workspace** any time to point it elsewhere. All agent tiles share this workspace path.
 
-### Dev note (this EC2 host): git worktrees per Bead
-
-On the OpenClaw EC2 host we run agents against this repo using **git worktrees** (to avoid multiple agents dirtying the same checkout).
-
-- Base clone: `/home/ubuntu/repos/openclaw-studio-base` (kept clean on `main`)
-- One worktree per Bead: `/home/ubuntu/worktrees/openclaw-studio/<agent>/<bead-id>`
-- Worktrees are deleted immediately after opening the PR
-
 ## Configuration
 
 Your gateway config lives in `openclaw.json` in your state directory. Defaults:
