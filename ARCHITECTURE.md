@@ -71,6 +71,7 @@ Flow:
 ### 3) Agent config + workspace files
 - **Workspace files**: `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `TOOLS.md`, `HEARTBEAT.md`, `MEMORY.md`.
 - **Heartbeat + rename**: stored in the gateway config and updated via `config.get` + `config.patch`.
+ - **Tool policy**: the gateway must allow `read`/`write` for the target agent (otherwise `/tools/invoke` returns 404).
 
 Flow:
 1. UI requests heartbeat data via gateway `config.get` (client WS) and applies overrides via `config.patch` (`src/lib/gateway/agentConfig.ts`).
