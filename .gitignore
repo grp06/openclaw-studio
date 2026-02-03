@@ -53,3 +53,5 @@ test-results
 /.moltbot
 /agent-canvas
 /worktrees
+
+AGENTS.md
