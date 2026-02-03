@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   extractThinking,
+  extractThinkingFromTaggedStream,
+  extractThinkingFromTaggedText,
   formatThinkingMarkdown,
   isTraceMarkdown,
   stripTraceMarkdown,
@@ -66,5 +68,17 @@ describe("formatThinkingMarkdown", () => {
     const formatted = formatThinkingMarkdown(input);
     expect(isTraceMarkdown(formatted)).toBe(true);
     expect(stripTraceMarkdown(formatted)).toBe("_Line 1_\n_Line 2_");
+  });
+});
+
+describe("extractThinkingFromTaggedText", () => {
+  it("extracts from closed thinking tags", () => {
+    expect(extractThinkingFromTaggedText("<thinking>Plan A</thinking>\nOk")).toBe("Plan A");
+  });
+});
+
+describe("extractThinkingFromTaggedStream", () => {
+  it("extracts partial thinking from an open thinking tag", () => {
+    expect(extractThinkingFromTaggedStream("Hello <think>Plan A so far")).toBe("Plan A so far");
   });
 });

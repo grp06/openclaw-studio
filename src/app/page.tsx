@@ -11,6 +11,7 @@ import { screenToWorld, worldToScreen } from "@/features/canvas/lib/transform";
 import {
   extractText,
   extractThinking,
+  extractThinkingFromTaggedStream,
   formatThinkingMarkdown,
   isTraceMarkdown,
   extractToolLines,
@@ -238,6 +239,41 @@ const buildHistoryLines = (messages: ChatHistoryMessage[]) => {
   return { lines: deduped, lastAssistant, lastRole, lastUser };
 };
 
+const mergeStreamingText = (current: string, incoming: string): string => {
+  if (!incoming) return current;
+  if (!current) return incoming;
+  if (incoming.startsWith(current)) return incoming;
+  if (current.startsWith(incoming)) return current;
+  if (current.endsWith(incoming)) return current;
+  if (incoming.endsWith(current)) return incoming;
+  return `${current}${incoming}`;
+};
+
+const extractReasoningBody = (value: string): string | null => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^reasoning:\s*([\s\S]*)$/i);
+  if (!match) return null;
+  const body = (match[1] ?? "").trim();
+  return body || null;
+};
+
+const resolveThinkingFromAgentStream = (
+  data: Record<string, unknown> | null,
+  rawStream: string
+): string | null => {
+  if (data) {
+    const extracted = extractThinking(data);
+    if (extracted) return extracted;
+    const text = typeof data.text === "string" ? data.text : "";
+    const delta = typeof data.delta === "string" ? data.delta : "";
+    const prefixed = extractReasoningBody(text) ?? extractReasoningBody(delta);
+    if (prefixed) return prefixed;
+  }
+  const tagged = extractThinkingFromTaggedStream(rawStream);
+  return tagged || null;
+};
+
 const buildMissingAgentLayouts = (params: {
   agentIds: string[];
   occupiedLayouts?: Record<string, StudioAgentLayout> | null;
@@ -387,6 +423,7 @@ const AgentCanvasPage = () => {
   const specialUpdateRef = useRef<Map<string, string>>(new Map());
   const specialUpdateInFlightRef = useRef<Set<string>>(new Set());
   const toolLinesSeenRef = useRef<Map<string, Set<string>>>(new Map());
+  const assistantStreamByRunRef = useRef<Map<string, string>>(new Map());
   // flowInstance removed (zoom controls live in the bottom-right ReactFlow Controls).
 
   const agents = state.agents;
@@ -1178,6 +1215,7 @@ const AgentCanvasPage = () => {
       if (!trimmed) return;
       const isResetCommand = /^\/(reset|new)(\s|$)/i.test(trimmed);
       const runId = crypto.randomUUID();
+      assistantStreamByRunRef.current.delete(runId);
       const tile = agents.find((entry) => entry.agentId === agentId);
       if (!tile) {
         dispatch({
@@ -1380,6 +1418,7 @@ const AgentCanvasPage = () => {
       if (payload.state === "final") {
         if (payload.runId) {
           chatRunSeenRef.current.delete(payload.runId);
+          assistantStreamByRunRef.current.delete(payload.runId);
         }
         if (
           !nextThinking &&
@@ -1447,6 +1486,7 @@ const AgentCanvasPage = () => {
       if (payload.state === "aborted") {
         if (payload.runId) {
           chatRunSeenRef.current.delete(payload.runId);
+          assistantStreamByRunRef.current.delete(payload.runId);
         }
         clearToolLinesSeen(payload.runId ?? null);
         dispatch({
@@ -1465,6 +1505,7 @@ const AgentCanvasPage = () => {
       if (payload.state === "error") {
         if (payload.runId) {
           chatRunSeenRef.current.delete(payload.runId);
+          assistantStreamByRunRef.current.delete(payload.runId);
         }
         clearToolLinesSeen(payload.runId ?? null);
         dispatch({
@@ -1508,24 +1549,46 @@ const AgentCanvasPage = () => {
           ? (payload.data as Record<string, unknown>)
           : null;
       const hasChatEvents = chatRunSeenRef.current.has(payload.runId);
-      if (stream === "assistant" && !hasChatEvents) {
+      if (stream === "assistant") {
         const rawText = typeof data?.text === "string" ? data.text : "";
         const rawDelta = typeof data?.delta === "string" ? data.delta : "";
-        const nextRaw = rawText || rawDelta;
-        if (!nextRaw) return;
-        if (isUiMetadataPrefix(nextRaw.trim())) return;
-        const cleaned = stripUiMetadata(nextRaw);
-        if (!cleaned) return;
-        dispatch({
-          type: "setStream",
-          agentId: match,
-          value: cleaned,
-        });
+        const previousRaw = assistantStreamByRunRef.current.get(payload.runId) ?? "";
+        let mergedRaw = previousRaw;
+        if (rawText) {
+          mergedRaw = rawText;
+        } else if (rawDelta) {
+          mergedRaw = mergeStreamingText(previousRaw, rawDelta);
+        }
+        if (mergedRaw) {
+          assistantStreamByRunRef.current.set(payload.runId, mergedRaw);
+        }
+        const liveThinking = resolveThinkingFromAgentStream(data, mergedRaw);
+        const patch: Partial<AgentTile> = {
+          status: "running",
+          runId: payload.runId,
+          lastActivityAt: Date.now(),
+        };
+        if (liveThinking) {
+          patch.thinkingTrace = liveThinking;
+        }
         dispatch({
           type: "updateAgent",
           agentId: match,
-          patch: { status: "running", runId: payload.runId, lastActivityAt: Date.now() },
+          patch,
         });
+        if (mergedRaw && (!rawText || !isUiMetadataPrefix(rawText.trim()))) {
+          const visibleText = extractText({ role: "assistant", content: mergedRaw }) ?? mergedRaw;
+          const cleaned = stripUiMetadata(visibleText);
+          if (cleaned) {
+            if (!hasChatEvents || !tile.streamText?.trim()) {
+              dispatch({
+                type: "setStream",
+                agentId: match,
+                value: cleaned,
+              });
+            }
+          }
+        }
         return;
       }
       if (stream === "tool") {
@@ -1605,6 +1668,7 @@ const AgentCanvasPage = () => {
       }
       if (phase === "end") {
         if (tile.runId && tile.runId !== payload.runId) return;
+        assistantStreamByRunRef.current.delete(payload.runId);
         if (!hasChatEvents) {
           const finalText = tile.streamText?.trim();
           if (finalText) {
@@ -1637,6 +1701,7 @@ const AgentCanvasPage = () => {
       }
       if (phase === "error") {
         if (tile.runId && tile.runId !== payload.runId) return;
+        assistantStreamByRunRef.current.delete(payload.runId);
         chatRunSeenRef.current.delete(payload.runId);
         clearToolLinesSeen(payload.runId);
         dispatch({
