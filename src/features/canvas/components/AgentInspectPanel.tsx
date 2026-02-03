@@ -331,6 +331,7 @@ export const AgentInspectPanel = ({
     heartbeatTargetMode,
     client,
     tile.agentId,
+    tile.sessionKey,
   ]);
 
   useEffect(() => {

@@ -7,7 +7,7 @@ import { AgentInspectPanel } from "@/features/canvas/components/AgentInspectPane
 import { HeaderBar } from "@/features/canvas/components/HeaderBar";
 import { ConnectionPanel } from "@/features/canvas/components/ConnectionPanel";
 import { MIN_TILE_SIZE } from "@/lib/canvasTileDefaults";
-import { screenToWorld, worldToScreen } from "@/features/canvas/lib/transform";
+import { screenToWorld } from "@/features/canvas/lib/transform";
 import {
   extractText,
   extractThinking,
@@ -27,7 +27,6 @@ import type { EventFrame } from "@/lib/gateway/frames";
 import type { GatewayModelChoice } from "@/lib/gateway/models";
 import {
   AgentCanvasProvider,
-  getSelectedAgent,
   useAgentCanvasStore,
 } from "@/features/canvas/state/store";
 import {
@@ -366,7 +365,6 @@ const AgentCanvasPage = () => {
     disconnect,
     setGatewayUrl,
     setToken,
-    clearError,
   } = useGatewayConnection();
 
   const { state, dispatch, hydrateAgents, setError, setLoading } = useAgentCanvasStore();
@@ -393,7 +391,6 @@ const AgentCanvasPage = () => {
   // flowInstance removed (zoom controls live in the bottom-right ReactFlow Controls).
 
   const agents = state.agents;
-  const selectedAgent = useMemo(() => getSelectedAgent(state), [state]);
   const inspectTile = useMemo(() => {
     if (!inspectAgentId) return null;
     return agents.find((entry) => entry.agentId === inspectAgentId) ?? null;
@@ -630,92 +627,6 @@ const AgentCanvasPage = () => {
     }
   }, [updateSpecialLatestUpdate]);
 
-  const computeNewTilePosition = useCallback(
-    (tileSize: { width: number; height: number }) => {
-      if (agents.length === 0) {
-        return { x: 80, y: 200 };
-      }
-
-      if (viewportSize.width === 0 || viewportSize.height === 0) {
-        const offset = agents.length * 36;
-        return { x: 80 + offset, y: 200 + offset };
-      }
-
-      const safeTop = 140;
-      const edgePadding = 24;
-      const step = 80;
-      const maxRings = 12;
-      const zoom = state.canvas.zoom;
-
-      const effectiveSize = {
-        width: Math.max(tileSize.width, MIN_TILE_SIZE.width),
-        height: Math.max(tileSize.height, MIN_TILE_SIZE.height),
-      };
-
-      const minCenterY = safeTop + (effectiveSize.height * zoom) / 2;
-      const screenCenter = {
-        x: viewportSize.width / 2,
-        y: Math.max(viewportSize.height / 2, minCenterY),
-      };
-      const worldCenter = screenToWorld(state.canvas, screenCenter);
-      const base = {
-        x: worldCenter.x - effectiveSize.width / 2,
-        y: worldCenter.y - effectiveSize.height / 2,
-      };
-
-      const candidateFits = (candidate: { x: number; y: number }) => {
-        const screen = worldToScreen(state.canvas, candidate);
-        const tileWidth = effectiveSize.width * zoom;
-        const tileHeight = effectiveSize.height * zoom;
-        return (
-          screen.x >= edgePadding &&
-          screen.y >= safeTop &&
-          screen.x + tileWidth <= viewportSize.width - edgePadding &&
-          screen.y + tileHeight <= viewportSize.height - edgePadding
-        );
-      };
-
-      const candidateOverlaps = (candidate: { x: number; y: number }) => {
-        const rect = {
-          x: candidate.x,
-          y: candidate.y,
-          width: effectiveSize.width,
-          height: effectiveSize.height,
-        };
-        return agents.some((tile) =>
-          rectsOverlap(
-            rect,
-            {
-              x: tile.position.x,
-              y: tile.position.y,
-              width: Math.max(tile.size.width, MIN_TILE_SIZE.width),
-              height: Math.max(tile.size.height, MIN_TILE_SIZE.height),
-            },
-            24
-          )
-        );
-      };
-
-      for (let ring = 0; ring <= maxRings; ring += 1) {
-        for (let dx = -ring; dx <= ring; dx += 1) {
-          for (let dy = -ring; dy <= ring; dy += 1) {
-            if (ring > 0 && Math.abs(dx) !== ring && Math.abs(dy) !== ring) {
-              continue;
-            }
-            const candidate = {
-              x: base.x + dx * step,
-              y: base.y + dy * step,
-            };
-            if (!candidateFits(candidate)) continue;
-            if (!candidateOverlaps(candidate)) return candidate;
-          }
-        }
-      }
-
-      return base;
-    },
-    [agents, state.canvas, viewportSize]
-  );
 
   const resolveAgentName = useCallback((agent: AgentsListResult["agents"][number]) => {
     const fromList = typeof agent.name === "string" ? agent.name.trim() : "";
@@ -1774,7 +1685,7 @@ const AgentCanvasPage = () => {
     } catch (err) {
       logger.error("Failed to save clean-up layout.", err);
     }
-  }, [agents, dispatch, gatewayUrl, updateStudioSettings]);
+  }, [agents, dispatch, gatewayUrl]);
 
   const handleMoveTile = useCallback(
     (agentId: string, position: { x: number; y: number }) => {
