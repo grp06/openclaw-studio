@@ -33,6 +33,7 @@ This keeps feature cohesion high while preserving a clear client/server boundary
 - **Gateway** (`src/lib/gateway`): WebSocket client for agent runtime (frames, connect, request/response). The OpenClaw control UI client is vendored in `src/lib/gateway/openclaw/GatewayBrowserClient.ts` with a sync script at `scripts/sync-openclaw-gateway-client.ts`.
 - **Gateway-backed config + agent-file edits** (`src/lib/gateway/agentConfig.ts`, `src/lib/gateway/tools.ts`, `src/app/api/gateway/tools/route.ts`): agent rename/heartbeat via `config.get` + `config.patch`, agent file read/write via `/tools/invoke` proxy.
 - **Local OpenClaw config + paths** (`src/lib/clawdbot`): state/config/.env path resolution with `OPENCLAW_*` env overrides (`src/lib/clawdbot/paths.ts`). Local config access is used for optional Discord provisioning and local path/config helpers; shared local config list helpers live in `src/lib/clawdbot/config.ts` and are reused by Discord provisioning. Gateway URL/token in Studio are sourced from studio settings.
+- **Shared agent config-list helpers** (`src/lib/agents/configList.ts`): pure `agents.list` read/write/upsert helpers reused by both gateway config patching (`src/lib/gateway/agentConfig.ts`) and local config access (`src/lib/clawdbot/config.ts`) to keep list-shape semantics aligned.
 - **Discord integration** (`src/lib/discord`, API route): channel provisioning and config binding (local gateway only).
 - **Shared utilities** (`src/lib/*`): env, ids, names, avatars, text parsing, logging, filesystem helpers.
 
@@ -99,6 +100,7 @@ Flow:
 - **Gateway-first agent records**: records map 1:1 to `agents.list` entries with main sessions; trade-off is no local-only agent concept.
 - **Gateway-backed config + agent-file edits**: rename/heartbeat via `config.patch`, agent files via `/tools/invoke`; trade-off is reliance on gateway availability and tool allowlists.
 - **Narrow local config mutation boundary**: local `openclaw.json` writes are limited to explicit local-only flows (currently Discord provisioning), and reuse shared list helpers instead of ad-hoc mutation paths; trade-off is less flexibility for local-only experimentation, but clearer ownership and lower drift risk.
+- **Shared `agents.list` helper layer**: gateway and local config paths now consume one pure helper module for list parsing/writing/upsert behavior; trade-off is one more shared dependency, but it reduces semantic drift and duplicate bug surface.
 - **Single gateway settings endpoint**: `/api/studio` is the sole Studio gateway URL/token source; trade-off is migration pressure on any older local-config-based callers, but it removes ambiguous ownership and dead paths.
 - **Shared client settings coordinator**: one coordinator now owns `/api/studio` load/schedule/flush behavior for gateway + focused + session state; trade-off is introducing a central client singleton, but it removes duplicate timers/fetch paths and reduces persistence races.
 - **Vendored gateway client + sync script**: reduces drift from upstream OpenClaw UI; trade-off is maintaining a sync path and local copies of upstream helpers.
