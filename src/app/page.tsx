@@ -1604,9 +1604,13 @@ const AgentStudioPage = () => {
                   agent={focusedAgent}
                   isSelected={false}
                   canSend={status === "connected"}
+                  models={gatewayModels}
                   onOpenSettings={() => handleOpenAgentSettings(focusedAgent.agentId)}
-                  onNameChange={(name) =>
-                    handleRenameAgent(focusedAgent.agentId, name)
+                  onModelChange={(value) =>
+                    handleModelChange(focusedAgent.agentId, focusedAgent.sessionKey, value)
+                  }
+                  onThinkingChange={(value) =>
+                    handleThinkingChange(focusedAgent.agentId, focusedAgent.sessionKey, value)
                   }
                   onDraftChange={(value) =>
                     handleDraftChange(focusedAgent.agentId, value)
@@ -1649,19 +1653,13 @@ const AgentStudioPage = () => {
                 <AgentSettingsPanel
                   key={settingsAgent.agentId}
                   agent={settingsAgent}
-                  client={client}
-                  models={gatewayModels}
                   onClose={() => {
                     setSettingsAgentId(null);
                     setMobilePane("chat");
                   }}
+                  onRename={(name) => handleRenameAgent(settingsAgent.agentId, name)}
+                  onNewSession={() => {}}
                   onDelete={() => handleDeleteAgent(settingsAgent.agentId)}
-                  onModelChange={(value) =>
-                    handleModelChange(settingsAgent.agentId, settingsAgent.sessionKey, value)
-                  }
-                  onThinkingChange={(value) =>
-                    handleThinkingChange(settingsAgent.agentId, settingsAgent.sessionKey, value)
-                  }
                   onToolCallingToggle={(enabled) =>
                     handleToolCallingToggle(settingsAgent.agentId, enabled)
                   }

@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { AgentState } from "@/features/agents/state/store";
 import { AgentSettingsPanel } from "@/features/agents/components/AgentSettingsPanel";
 
@@ -39,48 +39,79 @@ describe("AgentSettingsPanel", () => {
     cleanup();
   });
 
-  it("renders_runtime_controls_without_brain_files_section", async () => {
-    const call = vi.fn(async () => ({ config: {} }));
-
+  it("renders_identity_rename_section_and_saves_trimmed_name", async () => {
+    const onRename = vi.fn(async () => true);
     render(
       createElement(AgentSettingsPanel, {
         agent: createAgent(),
-        client: { call } as never,
-        models: [{ provider: "openai", id: "gpt-5", name: "gpt-5", reasoning: true }],
         onClose: vi.fn(),
+        onRename,
+        onNewSession: vi.fn(),
         onDelete: vi.fn(),
-        onModelChange: vi.fn(),
-        onThinkingChange: vi.fn(),
         onToolCallingToggle: vi.fn(),
         onThinkingTracesToggle: vi.fn(),
       })
     );
 
-    expect(screen.getByText("Runtime settings")).toBeInTheDocument();
-    expect(screen.queryByText("Brain files")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Agent name"), {
+      target: { value: "  Agent Two  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+
     await waitFor(() => {
-      expect(call).toHaveBeenCalledWith("config.get", {});
+      expect(onRename).toHaveBeenCalledWith("Agent Two");
     });
   });
 
-  it("shows_heartbeat_controls_and_model_select", () => {
-    const call = vi.fn(async () => ({ config: {} }));
-
+  it("keeps_show_tool_calls_and_show_thinking_toggles", () => {
     render(
       createElement(AgentSettingsPanel, {
         agent: createAgent(),
-        client: { call } as never,
-        models: [{ provider: "openai", id: "gpt-5", name: "gpt-5", reasoning: true }],
         onClose: vi.fn(),
+        onRename: vi.fn(async () => true),
+        onNewSession: vi.fn(),
         onDelete: vi.fn(),
-        onModelChange: vi.fn(),
-        onThinkingChange: vi.fn(),
         onToolCallingToggle: vi.fn(),
         onThinkingTracesToggle: vi.fn(),
       })
     );
 
-    expect(screen.getByText("Heartbeat config")).toBeInTheDocument();
-    expect(screen.getByText("Model")).toBeInTheDocument();
+    expect(screen.getByLabelText("Show tool calls")).toBeInTheDocument();
+    expect(screen.getByLabelText("Show thinking")).toBeInTheDocument();
+  });
+
+  it("does_not_render_runtime_settings_section", () => {
+    render(
+      createElement(AgentSettingsPanel, {
+        agent: createAgent(),
+        onClose: vi.fn(),
+        onRename: vi.fn(async () => true),
+        onNewSession: vi.fn(),
+        onDelete: vi.fn(),
+        onToolCallingToggle: vi.fn(),
+        onThinkingTracesToggle: vi.fn(),
+      })
+    );
+
+    expect(screen.queryByText("Runtime settings")).not.toBeInTheDocument();
+    expect(screen.queryByText("Brain files")).not.toBeInTheDocument();
+  });
+
+  it("invokes_on_new_session_when_clicked", () => {
+    const onNewSession = vi.fn();
+    render(
+      createElement(AgentSettingsPanel, {
+        agent: createAgent(),
+        onClose: vi.fn(),
+        onRename: vi.fn(async () => true),
+        onNewSession,
+        onDelete: vi.fn(),
+        onToolCallingToggle: vi.fn(),
+        onThinkingTracesToggle: vi.fn(),
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "New session" }));
+    expect(onNewSession).toHaveBeenCalledTimes(1);
   });
 });

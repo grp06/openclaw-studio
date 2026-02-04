@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentState as AgentRecord } from "@/features/agents/state/store";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { normalizeAgentName } from "@/lib/names/agentNames";
 import { Cog, Shuffle } from "lucide-react";
+import type { GatewayModelChoice } from "@/lib/gateway/models";
 import { AgentAvatar } from "./AgentAvatar";
 import { buildAgentChatItems, summarizeToolLabel } from "./chatItems";
 import { EmptyStatePanel } from "./EmptyStatePanel";
@@ -12,8 +12,10 @@ type AgentChatPanelProps = {
   agent: AgentRecord;
   isSelected: boolean;
   canSend: boolean;
+  models: GatewayModelChoice[];
   onOpenSettings: () => void;
-  onNameChange: (name: string) => Promise<boolean>;
+  onModelChange: (value: string | null) => void;
+  onThinkingChange: (value: string | null) => void;
   onDraftChange: (value: string) => void;
   onSend: (message: string) => void;
   onAvatarShuffle: () => void;
@@ -23,13 +25,14 @@ export const AgentChatPanel = ({
   agent,
   isSelected,
   canSend,
+  models,
   onOpenSettings,
-  onNameChange,
+  onModelChange,
+  onThinkingChange,
   onDraftChange,
   onSend,
   onAvatarShuffle,
 }: AgentChatPanelProps) => {
-  const [nameDraft, setNameDraft] = useState(agent.name);
   const [draftValue, setDraftValue] = useState(agent.draft);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
   const chatRef = useRef<HTMLDivElement | null>(null);
@@ -48,11 +51,6 @@ export const AgentChatPanel = ({
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setNameDraft(agent.name);
-  }, [agent.name]);
-
-  useEffect(() => {
     if (agent.draft === plainDraftRef.current) return;
     plainDraftRef.current = agent.draft;
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -62,23 +60,6 @@ export const AgentChatPanel = ({
   useEffect(() => {
     resizeDraft();
   }, [resizeDraft, agent.draft]);
-
-  const commitName = async () => {
-    const next = normalizeAgentName(nameDraft);
-    if (!next) {
-      setNameDraft(agent.name);
-      return;
-    }
-    if (next === agent.name) {
-      return;
-    }
-    const ok = await onNameChange(next);
-    if (!ok) {
-      setNameDraft(agent.name);
-      return;
-    }
-    setNameDraft(next);
-  };
 
   const statusColor =
     agent.status === "running"
@@ -110,6 +91,26 @@ export const AgentChatPanel = ({
       agent.toolCallingEnabled,
     ]
   );
+
+  const modelOptions = useMemo(
+    () =>
+      models.map((entry) => ({
+        value: `${entry.provider}/${entry.id}`,
+        label:
+          entry.name === `${entry.provider}/${entry.id}`
+            ? entry.name
+            : `${entry.name} (${entry.provider}/${entry.id})`,
+        reasoning: entry.reasoning,
+      })),
+    [models]
+  );
+  const modelValue = agent.model ?? "";
+  const modelOptionsWithFallback =
+    modelValue && !modelOptions.some((option) => option.value === modelValue)
+      ? [{ value: modelValue, label: modelValue, reasoning: undefined }, ...modelOptions]
+      : modelOptions;
+  const selectedModel = modelOptionsWithFallback.find((option) => option.value === modelValue);
+  const allowThinking = selectedModel?.reasoning !== false;
 
   const avatarSeed = agent.avatarSeed ?? agent.agentId;
   return (
@@ -145,23 +146,9 @@ export const AgentChatPanel = ({
                   isSelected ? "agent-name-selected" : "border-border"
                 }`}
               >
-                <input
-                  className="w-full bg-transparent text-center text-xs font-semibold uppercase tracking-[0.16em] text-foreground outline-none"
-                  value={nameDraft}
-                  onChange={(event) => setNameDraft(event.target.value)}
-                  onBlur={() => {
-                    void commitName();
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.currentTarget.blur();
-                    }
-                    if (event.key === "Escape") {
-                      setNameDraft(agent.name);
-                      event.currentTarget.blur();
-                    }
-                  }}
-                />
+                <div className="w-full text-center text-xs font-semibold uppercase tracking-[0.16em] text-foreground">
+                  {agent.name}
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <span
@@ -179,6 +166,53 @@ export const AgentChatPanel = ({
                 >
                   <Cog className="h-4 w-4" />
                 </button>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_128px]">
+                <label className="flex min-w-0 flex-col gap-1 font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  <span>Model</span>
+                  <select
+                    className="h-8 w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap rounded-md border border-border bg-card/75 px-2 text-[11px] font-semibold text-foreground"
+                    aria-label="Model"
+                    value={modelValue}
+                    onChange={(event) => {
+                      const value = event.target.value.trim();
+                      onModelChange(value ? value : null);
+                    }}
+                  >
+                    {modelOptionsWithFallback.length === 0 ? (
+                      <option value="">No models found</option>
+                    ) : null}
+                    {modelOptionsWithFallback.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {allowThinking ? (
+                  <label className="flex flex-col gap-1 font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    <span>Thinking</span>
+                    <select
+                      className="h-8 rounded-md border border-border bg-card/75 px-2 text-[11px] font-semibold text-foreground"
+                      aria-label="Thinking"
+                      value={agent.thinkingLevel ?? ""}
+                      onChange={(event) => {
+                        const value = event.target.value.trim();
+                        onThinkingChange(value ? value : null);
+                      }}
+                    >
+                      <option value="">Default</option>
+                      <option value="off">Off</option>
+                      <option value="minimal">Minimal</option>
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="xhigh">XHigh</option>
+                    </select>
+                  </label>
+                ) : (
+                  <div />
+                )}
               </div>
             </div>
           </div>

@@ -49,7 +49,15 @@ test-results
 /output/playwright
 
 # agent state
-/.agent
+/.agent/*
+!/.agent/PLANS.md
+!/.agent/README.md
+!/.agent/done/
+!/.agent/done/**
+/.agent/local
+/.agent/execplan-pending.md
+/.agent/*.local.md
+/.agent/future-plans
 /.openclaw
 /.clawdbot
 /.moltbot

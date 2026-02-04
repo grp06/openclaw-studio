@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || exit 0)"
+agent_dir="$repo_root/.agent"
+private_dir="${OPENCLAW_STUDIO_PRIVATE_AGENT_DIR:-$HOME/.codex/private/openclaw-studio}"
+local_link="$agent_dir/local"
+
+mkdir -p "$agent_dir"
+mkdir -p "$private_dir"
+
+if [ -e "$local_link" ] && [ ! -L "$local_link" ]; then
+  exit 0
+fi
+
+if [ -L "$local_link" ]; then
+  target="$(readlink "$local_link")"
+  if [ "$target" = "$private_dir" ]; then
+    exit 0
+  fi
+fi
+
+ln -sfn "$private_dir" "$local_link"
