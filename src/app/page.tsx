@@ -50,7 +50,7 @@ import {
 } from "@/lib/gateway/sessionKeys";
 import { buildAvatarDataUrl } from "@/lib/avatars/multiavatar";
 import { fetchStudioSettings, updateStudioSettings } from "@/lib/studio/client";
-import { resolveFocusedPreference } from "@/lib/studio/settings";
+import { resolveFocusedPreference, resolveStudioSessionId } from "@/lib/studio/settings";
 import { generateUUID } from "@/lib/gateway/openclaw/uuid";
 
 type ChatHistoryMessage = Record<string, unknown>;
@@ -332,7 +332,7 @@ const AgentStudioPage = () => {
   const [gatewayModels, setGatewayModels] = useState<GatewayModelChoice[]>([]);
   const [gatewayModelsError, setGatewayModelsError] = useState<string | null>(null);
   const [inspectAgentId, setInspectAgentId] = useState<string | null>(null);
-  const studioSessionIdRef = useRef<string>(generateUUID());
+  const studioSessionIdRef = useRef<string | null>(null);
   const thinkingDebugRef = useRef<Set<string>>(new Set());
   const chatRunSeenRef = useRef<Set<string>>(new Set());
   const specialUpdateRef = useRef<Map<string, string>>(new Map());
@@ -617,8 +617,60 @@ const AgentStudioPage = () => {
     setLoading(true);
     try {
       const agentsResult = await client.call<AgentsListResult>("agents.list", {});
-      const sessionId = studioSessionIdRef.current || generateUUID();
-      studioSessionIdRef.current = sessionId;
+      type StudioSessionEntry = { key: string; sessionId: string; updatedAt: number };
+      type StudioSessionsForAgent = { agentId: string; entries: StudioSessionEntry[] };
+      const studioSessionsByAgent = await Promise.all(
+        agentsResult.agents.map(async (agent): Promise<StudioSessionsForAgent> => {
+          const prefix = `agent:${agent.id}:studio:`;
+          try {
+            const sessions = await client.call<SessionsListResult>("sessions.list", {
+              agentId: agent.id,
+              includeGlobal: false,
+              includeUnknown: false,
+              limit: 64,
+            });
+            const entries = Array.isArray(sessions.sessions) ? sessions.sessions : [];
+            const studioEntries = entries
+              .map((entry): StudioSessionEntry | null => {
+                const key = entry.key?.trim();
+                if (!key || !key.startsWith(prefix)) return null;
+                const suffix = key.slice(prefix.length).trim();
+                if (!suffix) return null;
+                const updatedAt = typeof entry.updatedAt === "number" ? entry.updatedAt : 0;
+                return { key, sessionId: suffix, updatedAt };
+              })
+              .filter((entry): entry is StudioSessionEntry => Boolean(entry))
+              .sort((a, b) => b.updatedAt - a.updatedAt);
+            return { agentId: agent.id, entries: studioEntries };
+          } catch (err) {
+            logger.error("Failed to list sessions while resolving studio session.", err);
+            return { agentId: agent.id, entries: [] };
+          }
+        })
+      );
+      const allStudioSessions = studioSessionsByAgent
+        .flatMap((group) => group.entries)
+        .sort((a, b) => b.updatedAt - a.updatedAt);
+      const hadPersistedSessionId = Boolean(studioSessionIdRef.current?.trim());
+      let sessionId = studioSessionIdRef.current?.trim() ?? "";
+      const hasPersistedSession =
+        sessionId.length > 0 && allStudioSessions.some((entry) => entry.sessionId === sessionId);
+      if (!sessionId || (allStudioSessions.length > 0 && !hasPersistedSession)) {
+        sessionId = allStudioSessions[0]?.sessionId ?? generateUUID();
+        studioSessionIdRef.current = sessionId;
+      }
+      if (!hadPersistedSessionId || !hasPersistedSession) {
+        const key = gatewayUrl.trim();
+        if (key) {
+          try {
+            await updateStudioSettings({
+              sessions: { [key]: sessionId },
+            });
+          } catch (err) {
+            logger.error("Failed to save studio session ID.", err);
+          }
+        }
+      }
       const seeds: AgentStoreSeed[] = agentsResult.agents.map((agent) => {
         const avatarSeed = agent.id;
         const avatarUrl = resolveAgentAvatarUrl(agent);
@@ -631,7 +683,45 @@ const AgentStudioPage = () => {
           avatarUrl,
         };
       });
+      const existingSessions = new Set<string>();
+      const staleStudioKeys: string[] = [];
+      for (const seed of seeds) {
+        const sessionsForAgent = studioSessionsByAgent.find(
+          (entry) => entry.agentId === seed.agentId
+        )?.entries;
+        if (!sessionsForAgent || sessionsForAgent.length === 0) continue;
+        const active = sessionsForAgent.find(
+          (entry) => entry.sessionId === sessionId
+        );
+        if (!active) continue;
+        existingSessions.add(active.key);
+        for (const entry of sessionsForAgent) {
+          if (entry.key === active.key) continue;
+          staleStudioKeys.push(entry.key);
+        }
+      }
+      if (staleStudioKeys.length > 0) {
+        await Promise.all(
+          staleStudioKeys.map(async (key) => {
+            try {
+              await client.call("sessions.delete", { key });
+            } catch (err) {
+              logger.error("Failed to prune duplicate studio session key.", err);
+            }
+          })
+        );
+      }
       hydrateAgents(seeds);
+      if (existingSessions.size > 0) {
+        for (const seed of seeds) {
+          if (!existingSessions.has(seed.sessionKey)) continue;
+          dispatch({
+            type: "updateAgent",
+            agentId: seed.agentId,
+            patch: { sessionCreated: true },
+          });
+        }
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load agents.";
       setError(message);
@@ -640,11 +730,13 @@ const AgentStudioPage = () => {
     }
   }, [
     client,
+    dispatch,
     hydrateAgents,
     resolveAgentAvatarUrl,
     resolveAgentName,
     setError,
     setLoading,
+    gatewayUrl,
     status,
   ]);
 
@@ -655,6 +747,7 @@ const AgentStudioPage = () => {
   useEffect(() => {
     let cancelled = false;
     const key = gatewayUrl.trim();
+    studioSessionIdRef.current = null;
     if (!key) {
       setFocusedPreferencesLoaded(true);
       return;
@@ -668,6 +761,10 @@ const AgentStudioPage = () => {
           !settingsResult.settings
         ) {
           return;
+        }
+        const persistedSessionId = resolveStudioSessionId(settingsResult.settings, key);
+        if (persistedSessionId) {
+          studioSessionIdRef.current = persistedSessionId;
         }
         const preference = resolveFocusedPreference(settingsResult.settings, key);
         if (preference) {
@@ -731,14 +828,9 @@ const AgentStudioPage = () => {
   }, [focusFilter, focusedPreferencesLoaded, gatewayUrl, state.selectedAgentId]);
 
   useEffect(() => {
-    if (status !== "connected") return;
-    studioSessionIdRef.current = generateUUID();
-  }, [gatewayUrl, status]);
-
-  useEffect(() => {
-    if (status !== "connected") return;
+    if (status !== "connected" || !focusedPreferencesLoaded) return;
     void loadAgents();
-  }, [gatewayUrl, loadAgents, status]);
+  }, [focusedPreferencesLoaded, gatewayUrl, loadAgents, status]);
 
   useEffect(() => {
     if (status === "disconnected") {
@@ -1013,6 +1105,14 @@ const AgentStudioPage = () => {
     },
     [client, dispatch]
   );
+
+  useEffect(() => {
+    if (status !== "connected") return;
+    for (const agent of agents) {
+      if (!agent.sessionCreated || agent.historyLoadedAt) continue;
+      void loadAgentHistory(agent.agentId);
+    }
+  }, [agents, loadAgentHistory, status]);
 
   const handleInspectAgent = useCallback(
     (agentId: string) => {

@@ -16,11 +16,13 @@ export type StudioSettings = {
   version: 1;
   gateway: StudioGatewaySettings | null;
   focused: Record<string, StudioFocusedPreference>;
+  sessions: Record<string, string>;
 };
 
 export type StudioSettingsPatch = {
   gateway?: StudioGatewaySettings | null;
   focused?: Record<string, Partial<StudioFocusedPreference> | null>;
+  sessions?: Record<string, string | null>;
 };
 
 const SETTINGS_VERSION = 1 as const;
@@ -109,20 +111,36 @@ const normalizeFocused = (value: unknown): Record<string, StudioFocusedPreferenc
   return focused;
 };
 
+const normalizeSessions = (value: unknown): Record<string, string> => {
+  if (!isRecord(value)) return {};
+  const sessions: Record<string, string> = {};
+  for (const [gatewayKeyRaw, sessionIdRaw] of Object.entries(value)) {
+    const gatewayKey = normalizeGatewayKey(gatewayKeyRaw);
+    if (!gatewayKey) continue;
+    const sessionId = coerceString(sessionIdRaw);
+    if (!sessionId) continue;
+    sessions[gatewayKey] = sessionId;
+  }
+  return sessions;
+};
+
 export const defaultStudioSettings = (): StudioSettings => ({
   version: SETTINGS_VERSION,
   gateway: null,
   focused: {},
+  sessions: {},
 });
 
 export const normalizeStudioSettings = (raw: unknown): StudioSettings => {
   if (!isRecord(raw)) return defaultStudioSettings();
   const gateway = normalizeGatewaySettings(raw.gateway);
   const focused = normalizeFocused(raw.focused);
+  const sessions = normalizeSessions(raw.sessions);
   return {
     version: SETTINGS_VERSION,
     gateway,
     focused,
+    sessions,
   };
 };
 
@@ -133,6 +151,7 @@ export const mergeStudioSettings = (
   const nextGateway =
     patch.gateway === undefined ? current.gateway : normalizeGatewaySettings(patch.gateway);
   const nextFocused = { ...current.focused };
+  const nextSessions = { ...current.sessions };
   if (patch.focused) {
     for (const [keyRaw, value] of Object.entries(patch.focused)) {
       const key = normalizeGatewayKey(keyRaw);
@@ -145,10 +164,24 @@ export const mergeStudioSettings = (
       nextFocused[key] = normalizeFocusedPreference(value, fallback);
     }
   }
+  if (patch.sessions) {
+    for (const [keyRaw, value] of Object.entries(patch.sessions)) {
+      const key = normalizeGatewayKey(keyRaw);
+      if (!key) continue;
+      if (value === null) {
+        delete nextSessions[key];
+        continue;
+      }
+      const sessionId = coerceString(value);
+      if (!sessionId) continue;
+      nextSessions[key] = sessionId;
+    }
+  }
   return {
     version: SETTINGS_VERSION,
     gateway: nextGateway ?? null,
     focused: nextFocused,
+    sessions: nextSessions,
   };
 };
 
@@ -159,4 +192,13 @@ export const resolveFocusedPreference = (
   const key = normalizeGatewayKey(gatewayUrl);
   if (!key) return null;
   return settings.focused[key] ?? null;
+};
+
+export const resolveStudioSessionId = (
+  settings: StudioSettings,
+  gatewayUrl: string
+): string | null => {
+  const key = normalizeGatewayKey(gatewayUrl);
+  if (!key) return null;
+  return settings.sessions[key] ?? null;
 };
