@@ -7,7 +7,7 @@ import {
   GatewayStatus,
 } from "./GatewayClient";
 import { env } from "@/lib/env";
-import { getStudioSettingsCoordinator } from "@/lib/studio/client";
+import { getStudioSettingsCoordinator } from "@/lib/studio/coordinator";
 
 const DEFAULT_GATEWAY_URL = env.NEXT_PUBLIC_GATEWAY_URL ?? "ws://127.0.0.1:18789";
 const formatGatewayError = (error: unknown) => {

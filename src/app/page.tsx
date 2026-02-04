@@ -36,11 +36,9 @@ import {
 import {
   type AgentEventPayload,
   type ChatEventPayload,
+  dedupeRunLines,
   getAgentSummaryPatch,
   getChatSummaryPatch,
-} from "@/features/agents/state/summary";
-import {
-  dedupeRunLines,
   mergeRuntimeStream,
   resolveLifecyclePatch,
   shouldPublishAssistantStream,
@@ -56,7 +54,7 @@ import {
   isSameSessionKey,
 } from "@/lib/gateway/sessionKeys";
 import { buildAvatarDataUrl } from "@/lib/avatars/multiavatar";
-import { getStudioSettingsCoordinator } from "@/lib/studio/client";
+import { getStudioSettingsCoordinator } from "@/lib/studio/coordinator";
 import { resolveFocusedPreference, resolveStudioSessionId } from "@/lib/studio/settings";
 import { generateUUID } from "@/lib/gateway/openclaw/uuid";
 
