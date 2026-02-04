@@ -6,7 +6,7 @@ This document describes the requirements for an execution plan ("ExecPlan"), a d
 
 When authoring an executable specification (ExecPlan), follow PLANS.md _to the letter_. If it is not in your context, refresh your memory by reading the entire PLANS.md file. Be thorough in reading (and re-reading) source material to produce an accurate specification. When creating a spec, start from the skeleton and flesh it out as you do your research.
 
-When implementing an executable specification (ExecPlan), do not prompt the user for "next steps"; simply proceed to the next milestone. Keep all sections up to date, add or split entries in the list at every stopping point to affirmatively state the progress made and next steps. Resolve ambiguities autonomously. For each milestone, write failing tests first (when tests are specified), implement until all tests pass, then commit the verified changes before proceeding to the next milestone. If the repo uses Beads, use `br ready` to select work and update issue status as you progress.
+When implementing an executable specification (ExecPlan), do not prompt the user for "next steps"; simply proceed to the next milestone. Keep all sections up to date, add or split entries in the list at every stopping point to affirmatively state the progress made and next steps. Resolve ambiguities autonomously. For each milestone, write failing tests first (when tests are specified), implement until all tests pass, then commit the verified changes before proceeding to the next milestone. If the repo uses Beads, use `br ready --json` to select work and update issue status as you progress. In this repository, Beads are local-only operational state and must not be committed to git.
 
 When discussing an executable specification (ExecPlan), record decisions in a log in the spec for posterity; it should be unambiguously clear why any change to the specification was made. ExecPlans are living documents, and it should always be possible to restart from _only_ the ExecPlan and no other work.
 
@@ -76,11 +76,13 @@ Commits should be frequent and atomic. Each milestone that passes verification s
 
 ## Issue Tracking with Beads
 
-ExecPlans integrate with Beads (`br`) for local issue tracking. When a repo has Beads initialized (`.beads/` directory exists), use it to track milestones as issues.
+ExecPlans can integrate with Beads (`br`) for local issue tracking and agent coordination. In this repository, `.beads/` is local-only state and is intentionally not committed.
 
 When authoring an ExecPlan, create a Beads issue for each milestone: `br create "Milestone N: <title>" --type task --priority <0-4> --description "<scope and acceptance criteria>"`. Use `br dep add <child> <parent>` to express milestone dependencies. Record the issue IDs in the Progress section.
 
-When implementing, use `br ready --json` to select the next unblocked milestone. Claim it with `br update <id> --status in_progress`. After verification passes, close it with `br close <id> --reason "Tests pass, committed"`. Run `br sync --flush-only` before committing to include the issue state in git history.
+When implementing, use `br ready --json` to select the next unblocked milestone. Claim it with `br update <id> --claim --json`. After verification passes, close it with `br close <id> --reason "Tests pass, committed" --json`. Run `br sync --flush-only` to persist local state.
+
+Never stage or commit `.beads/` artifacts from this repository.
 
 If Beads is not initialized or the user has not requested issue tracking, skip these steps.
 
