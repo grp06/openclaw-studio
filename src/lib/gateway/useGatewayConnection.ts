@@ -43,6 +43,7 @@ export const useGatewayConnection = (): GatewayConnectionState => {
   const [status, setStatus] = useState<GatewayStatus>("disconnected");
   const [error, setError] = useState<string | null>(null);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,6 +77,9 @@ export const useGatewayConnection = (): GatewayConnectionState => {
   useEffect(() => {
     return client.onStatus((nextStatus) => {
       setStatus(nextStatus);
+      if (nextStatus === "connected") {
+        setHasConnectedOnce(true);
+      }
       if (nextStatus !== "connecting") {
         setError(null);
       }
@@ -106,8 +110,10 @@ export const useGatewayConnection = (): GatewayConnectionState => {
     void connect();
   }, [connect, gatewayUrl, settingsLoaded]);
 
+  // Only persist gateway settings after a successful connection to avoid
+  // overwriting a valid token with an empty string on initial load
   useEffect(() => {
-    if (!settingsLoaded) return;
+    if (!settingsLoaded || !hasConnectedOnce) return;
     settingsCoordinator.schedulePatch(
       {
         gateway: {
@@ -117,7 +123,7 @@ export const useGatewayConnection = (): GatewayConnectionState => {
       },
       400
     );
-  }, [gatewayUrl, settingsCoordinator, settingsLoaded, token]);
+  }, [gatewayUrl, hasConnectedOnce, settingsCoordinator, settingsLoaded, token]);
 
   const disconnect = useCallback(() => {
     setError(null);
