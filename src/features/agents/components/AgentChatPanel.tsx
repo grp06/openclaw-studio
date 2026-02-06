@@ -41,6 +41,8 @@ export const AgentChatPanel = ({
   const [draftValue, setDraftValue] = useState(agent.draft);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
   const chatRef = useRef<HTMLDivElement | null>(null);
+  const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  const scrollToBottomNextOutputRef = useRef(false);
   const plainDraftRef = useRef(agent.draft);
 
   const resizeDraft = useCallback(() => {
@@ -65,6 +67,34 @@ export const AgentChatPanel = ({
   useEffect(() => {
     resizeDraft();
   }, [resizeDraft, agent.draft]);
+
+  const scrollChatToBottom = useCallback(() => {
+    if (!chatRef.current) return;
+    if (chatBottomRef.current) {
+      chatBottomRef.current.scrollIntoView({ block: "end" });
+      return;
+    }
+    chatRef.current.scrollTop = chatRef.current.scrollHeight;
+  }, []);
+
+  useEffect(() => {
+    if (!scrollToBottomNextOutputRef.current) return;
+    scrollToBottomNextOutputRef.current = false;
+    requestAnimationFrame(() => {
+      scrollChatToBottom();
+    });
+  }, [agent.outputLines.length, scrollChatToBottom]);
+
+  const handleSend = useCallback(
+    (message: string) => {
+      if (!canSend || agent.status === "running") return;
+      const trimmed = message.trim();
+      if (!trimmed) return;
+      scrollToBottomNextOutputRef.current = true;
+      onSend(trimmed);
+    },
+    [agent.status, canSend, onSend]
+  );
 
   const statusColor =
     agent.status === "running"
@@ -306,13 +336,26 @@ export const AgentChatPanel = ({
                     return (
                       <details
                         key={`chat-${agent.agentId}-thinking-${index}`}
-                        className="rounded-md border border-border/70 bg-muted/55 px-2 py-1 text-[11px] text-muted-foreground"
+                        className="rounded-md border border-border/70 bg-muted/55 text-[11px] text-muted-foreground"
                         open={autoExpandThinking && index === lastThinkingItemIndex}
                       >
-                        <summary className="cursor-pointer select-none font-mono text-[10px] font-semibold uppercase tracking-[0.11em]">
-                          Thinking
+                        <summary className="flex cursor-pointer list-none items-center gap-2 px-2 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.11em] [&::-webkit-details-marker]:hidden">
+                          <AgentAvatar
+                            seed={avatarSeed}
+                            name={agent.name}
+                            avatarUrl={agent.avatarUrl ?? null}
+                            size={22}
+                          />
+                          <span>Thinking</span>
+                          {agent.status === "running" && item.live ? (
+                            <span className="typing-dots" aria-hidden="true">
+                              <span />
+                              <span />
+                              <span />
+                            </span>
+                          ) : null}
                         </summary>
-                        <div className="agent-markdown mt-1 text-foreground">
+                        <div className="agent-markdown px-2 pb-2 text-foreground">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {item.text}
                           </ReactMarkdown>
@@ -371,7 +414,7 @@ export const AgentChatPanel = ({
                       size={22}
                     />
                     <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.11em]">
-                      Responding
+                      Thinking
                     </span>
                     <span className="typing-dots" aria-hidden="true">
                       <span />
@@ -380,6 +423,7 @@ export const AgentChatPanel = ({
                     </span>
                   </div>
                 ) : null}
+                <div ref={chatBottomRef} />
               </>
             )}
           </div>
@@ -402,10 +446,7 @@ export const AgentChatPanel = ({
               if (event.key !== "Enter" || event.shiftKey) return;
               if (event.defaultPrevented) return;
               event.preventDefault();
-              if (!canSend || agent.status === "running") return;
-              const message = draftValue.trim();
-              if (!message) return;
-              onSend(message);
+              handleSend(draftValue);
             }}
             placeholder="type a message"
           />
@@ -422,7 +463,7 @@ export const AgentChatPanel = ({
           <button
             className="rounded-md border border-transparent bg-primary px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-foreground shadow-sm transition hover:brightness-110 disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
             type="button"
-            onClick={() => onSend(draftValue)}
+            onClick={() => handleSend(draftValue)}
             disabled={!canSend || agent.status === "running" || !draftValue.trim()}
           >
             Send

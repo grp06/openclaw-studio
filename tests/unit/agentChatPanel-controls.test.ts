@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { AgentState } from "@/features/agents/state/store";
 import { AgentChatPanel } from "@/features/agents/components/AgentChatPanel";
 import type { GatewayModelChoice } from "@/lib/gateway/models";
@@ -190,7 +190,7 @@ describe("AgentChatPanel controls", () => {
     );
 
     expect(screen.getByTestId("agent-typing-indicator")).toBeInTheDocument();
-    expect(screen.getByText("Responding")).toBeInTheDocument();
+    expect(within(screen.getByTestId("agent-typing-indicator")).getByText("Thinking")).toBeInTheDocument();
   });
 
   it("hides_typing_indicator_after_stream_starts", () => {
@@ -266,8 +266,7 @@ describe("AgentChatPanel controls", () => {
       })
     );
 
-    const thinkingSummary = screen.getByText("Thinking", { selector: "summary" });
-    expect(thinkingSummary.closest("details")).toHaveAttribute("open");
+    expect(screen.getByText("thinking now").closest("details")).toHaveAttribute("open");
   });
 
   it("closes_thinking_panel_when_final_message_is_present", () => {
@@ -292,7 +291,6 @@ describe("AgentChatPanel controls", () => {
       })
     );
 
-    const thinkingSummary = screen.getByText("Thinking", { selector: "summary" });
-    expect(thinkingSummary.closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("thinking now").closest("details")).not.toHaveAttribute("open");
   });
 });
