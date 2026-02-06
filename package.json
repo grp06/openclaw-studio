@@ -28,8 +28,7 @@
     "react-markdown": "^10.1.0",
     "react-mentions-ts": "^5.4.7",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^3.4.0",
-    "zod": "^4.3.6"
+    "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.0",
