@@ -5,7 +5,7 @@ import {
   removeCronJob,
   removeCronJobsForAgent,
   runCronJobNow,
-} from "@/lib/cron/gateway";
+} from "@/lib/cron/types";
 import type { GatewayClient } from "@/lib/gateway/GatewayClient";
 
 describe("cron gateway client", () => {

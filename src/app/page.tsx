@@ -56,14 +56,15 @@ import {
   shouldPublishAssistantStream,
 } from "@/features/agents/state/runtimeEventBridge";
 import type { AgentStoreSeed, AgentState } from "@/features/agents/state/store";
-import type { CronJobSummary } from "@/lib/cron/types";
 import {
+  type CronJobSummary,
+  filterCronJobsForAgent,
   listCronJobs,
   removeCronJob,
   removeCronJobsForAgent,
+  resolveLatestCronJobForAgent,
   runCronJobNow,
-} from "@/lib/cron/gateway";
-import { filterCronJobsForAgent, resolveLatestCronJobForAgent } from "@/lib/cron/types";
+} from "@/lib/cron/types";
 import {
   createGatewayAgent,
   renameGatewayAgent,
