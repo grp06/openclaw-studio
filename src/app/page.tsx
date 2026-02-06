@@ -62,11 +62,13 @@ import {
   formatCronJobDisplay,
   listCronJobs,
   removeCronJob,
+  removeCronJobsForAgent,
   resolveLatestCronJobForAgent,
   runCronJobNow,
 } from "@/lib/cron/types";
 import {
   createGatewayAgent,
+  deleteGatewayAgent,
   renameGatewayAgent,
   removeGatewayHeartbeatOverride,
   listHeartbeatsForAgent,
@@ -83,6 +85,7 @@ import { getStudioSettingsCoordinator } from "@/lib/studio/coordinator";
 import { resolveFocusedPreference } from "@/lib/studio/settings";
 import { applySessionSettingMutation } from "@/features/agents/state/sessionSettingsMutations";
 import { syncGatewaySessionSettings } from "@/lib/gateway/GatewayClient";
+import { fetchJson } from "@/lib/http";
 
 type ChatHistoryMessage = Record<string, unknown>;
 
@@ -110,20 +113,18 @@ type AgentsListResult = {
   }>;
 };
 
-type AgentsDeleteResult = {
-  ok: true;
-  agentId: string;
-  removedConfig: boolean;
-  removedBindings: number;
-  removedAllow: number;
-  removedCronJobs: number;
-  workspace: string;
-  agentDir: string;
-  sessionsDir: string;
-  trashedWorkspace: boolean;
-  trashedAgentDir: boolean;
-  trashedSessionsDir: boolean;
+type GatewayAgentStateMove = {
+  from: string;
+  to: string;
+};
+
+type TrashAgentStateResult = {
   trashDir: string;
+  moved: GatewayAgentStateMove[];
+};
+
+type RestoreAgentStateResult = {
+  restored: GatewayAgentStateMove[];
 };
 
 type SessionsListEntry = {
@@ -1055,7 +1056,7 @@ const AgentStudioPage = () => {
       const agent = agents.find((entry) => entry.agentId === agentId);
       if (!agent) return;
       const confirmed = window.confirm(
-        `Delete ${agent.name}? This prunes the agent's workspace/state on the gateway host (and removes its config + cron jobs).`
+        `Delete ${agent.name}? This removes the agent from gateway config + cron and moves its workspace/state into ~/.openclaw/trash on the gateway host.`
       );
       if (!confirmed) return;
       setDeleteAgentBlock({
@@ -1077,7 +1078,31 @@ const AgentStudioPage = () => {
                 phase: "deleting",
               };
             });
-            await client.call<AgentsDeleteResult>("agents.delete", { agentId });
+            const { result: trashed } = await fetchJson<{ result: TrashAgentStateResult }>(
+              "/api/gateway/agent-state",
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ agentId }),
+              }
+            );
+            try {
+              await removeCronJobsForAgent(client, agentId);
+              await deleteGatewayAgent({ client, agentId });
+            } catch (err) {
+              if (trashed.moved.length > 0) {
+                try {
+                  await fetchJson<{ result: RestoreAgentStateResult }>("/api/gateway/agent-state", {
+                    method: "PUT",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ agentId, trashDir: trashed.trashDir }),
+                  });
+                } catch (restoreErr) {
+                  console.error(restoreErr);
+                }
+              }
+              throw err;
+            }
             setSettingsAgentId(null);
             setDeleteAgentBlock((current) => {
               if (!current || current.agentId !== agentId) return current;
