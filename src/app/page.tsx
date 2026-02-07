@@ -88,6 +88,7 @@ import { resolveAgentAvatarSeed, resolveFocusedPreference } from "@/lib/studio/s
 import { applySessionSettingMutation } from "@/features/agents/state/sessionSettingsMutations";
 import { syncGatewaySessionSettings } from "@/lib/gateway/GatewayClient";
 import { fetchJson } from "@/lib/http";
+import { bootstrapAgentBrainFilesFromTemplate } from "@/lib/gateway/agentFilesBootstrap";
 
 type ChatHistoryMessage = Record<string, unknown>;
 
@@ -149,7 +150,7 @@ type DeleteAgentBlockState = {
   startedAt: number;
   sawDisconnect: boolean;
 };
-type CreateAgentBlockPhase = "queued" | "creating" | "awaiting-restart";
+type CreateAgentBlockPhase = "queued" | "creating" | "awaiting-restart" | "bootstrapping-files";
 type CreateAgentBlockState = {
   agentId: string | null;
   agentName: string;
@@ -1533,6 +1534,23 @@ const AgentStudioPage = () => {
     const finalize = async () => {
       await loadAgents();
       if (cancelled) return;
+      const newAgentId = createAgentBlock.agentId?.trim() ?? "";
+      if (newAgentId) {
+        setCreateAgentBlock((current) => {
+          if (!current || current.agentId !== newAgentId) return current;
+          return { ...current, phase: "bootstrapping-files" };
+        });
+        try {
+          await bootstrapAgentBrainFilesFromTemplate({ client, agentId: newAgentId });
+        } catch (err) {
+          const message =
+            err instanceof Error
+              ? err.message
+              : "Failed to bootstrap brain files for the new agent.";
+          console.error(message, err);
+          setError(message);
+        }
+      }
       setCreateAgentBlock(null);
       setMobilePane("chat");
     };
@@ -1540,7 +1558,7 @@ const AgentStudioPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [createAgentBlock, loadAgents, status]);
+  }, [client, createAgentBlock, loadAgents, setError, status]);
 
   useEffect(() => {
     if (!createAgentBlock) return;
@@ -2328,6 +2346,8 @@ const AgentStudioPage = () => {
       ? "Waiting for active runs to finish"
       : createAgentBlock.phase === "creating"
       ? "Submitting config change"
+      : createAgentBlock.phase === "bootstrapping-files"
+        ? "Bootstrapping brain files"
       : !createAgentBlock.sawDisconnect
         ? "Waiting for gateway to restart"
         : status === "connected"
