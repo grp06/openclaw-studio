@@ -15,6 +15,7 @@ import remarkGfm from "remark-gfm";
 import { Cog, Shuffle } from "lucide-react";
 import type { GatewayModelChoice } from "@/lib/gateway/models";
 import { isToolMarkdown, isTraceMarkdown } from "@/lib/text/message-extract";
+import { isNearBottom } from "@/lib/dom/scroll";
 import { AgentAvatar } from "./AgentAvatar";
 import { buildAgentChatItems, summarizeToolLabel, type AgentChatItem } from "./chatItems";
 import { EmptyStatePanel } from "./EmptyStatePanel";
@@ -45,6 +46,8 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
   lastThinkingItemIndex,
   showTypingIndicator,
   outputLineCount,
+  liveAssistantCharCount,
+  liveThinkingCharCount,
   scrollToBottomNextOutputRef,
 }: {
   agentId: string;
@@ -57,10 +60,16 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
   lastThinkingItemIndex: number;
   showTypingIndicator: boolean;
   outputLineCount: number;
+  liveAssistantCharCount: number;
+  liveThinkingCharCount: number;
   scrollToBottomNextOutputRef: MutableRefObject<boolean>;
 }) {
   const chatRef = useRef<HTMLDivElement | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  const scrollFrameRef = useRef<number | null>(null);
+  const pinnedRef = useRef(true);
+  const [isPinned, setIsPinned] = useState(true);
+  const [hasUnseen, setHasUnseen] = useState(false);
 
   const scrollChatToBottom = useCallback(() => {
     if (!chatRef.current) return;
@@ -71,114 +80,200 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
     chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, []);
 
-  useEffect(() => {
-    if (!scrollToBottomNextOutputRef.current) return;
-    scrollToBottomNextOutputRef.current = false;
-    requestAnimationFrame(() => {
+  const setPinned = useCallback((nextPinned: boolean) => {
+    if (pinnedRef.current === nextPinned) return;
+    pinnedRef.current = nextPinned;
+    setIsPinned(nextPinned);
+    if (nextPinned) {
+      setHasUnseen(false);
+    }
+  }, []);
+
+  const updatePinnedFromScroll = useCallback(() => {
+    const el = chatRef.current;
+    if (!el) return;
+    setPinned(
+      isNearBottom(
+        {
+          scrollTop: el.scrollTop,
+          scrollHeight: el.scrollHeight,
+          clientHeight: el.clientHeight,
+        },
+        48
+      )
+    );
+  }, [setPinned]);
+
+  const scheduleScrollToBottom = useCallback(() => {
+    if (scrollFrameRef.current !== null) return;
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
       scrollChatToBottom();
     });
-  }, [outputLineCount, scrollChatToBottom, scrollToBottomNextOutputRef]);
+  }, [scrollChatToBottom]);
+
+  useEffect(() => {
+    updatePinnedFromScroll();
+  }, [updatePinnedFromScroll]);
+
+  useEffect(() => {
+    const shouldForceScroll = scrollToBottomNextOutputRef.current;
+    if (shouldForceScroll) {
+      scrollToBottomNextOutputRef.current = false;
+      setHasUnseen(false);
+      pinnedRef.current = true;
+      setIsPinned(true);
+      scheduleScrollToBottom();
+      return;
+    }
+
+    if (pinnedRef.current) {
+      scheduleScrollToBottom();
+      return;
+    }
+
+    setHasUnseen(true);
+  }, [
+    liveAssistantCharCount,
+    liveThinkingCharCount,
+    outputLineCount,
+    scheduleScrollToBottom,
+    scrollToBottomNextOutputRef,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
+  }, []);
 
   return (
-    <div
-      ref={chatRef}
-      className="flex-1 overflow-auto rounded-md border border-border/80 bg-card/75 p-3 sm:p-4"
-      onWheel={(event) => {
-        event.stopPropagation();
-      }}
-      onWheelCapture={(event) => {
-        event.stopPropagation();
-      }}
-    >
-      <div className="flex flex-col gap-3 text-xs text-foreground">
-        {chatItems.length === 0 ? (
-          <EmptyStatePanel title="No messages yet." compact className="p-3 text-xs" />
-        ) : (
-          <>
-            {chatItems.map((item, index) => {
-              if (item.kind === "thinking") {
-                return (
-                  <details
-                    key={`chat-${agentId}-thinking-${index}`}
-                    className="rounded-md border border-border/70 bg-muted/55 text-[11px] text-muted-foreground"
-                    open={autoExpandThinking && index === lastThinkingItemIndex}
-                  >
-                    <summary className="flex cursor-pointer list-none items-center gap-2 px-2 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.11em] [&::-webkit-details-marker]:hidden">
-                      <AgentAvatar seed={avatarSeed} name={name} avatarUrl={avatarUrl} size={22} />
-                      <span>Thinking</span>
-                      {status === "running" && item.live ? (
-                        <span className="typing-dots" aria-hidden="true">
-                          <span />
-                          <span />
-                          <span />
-                        </span>
-                      ) : null}
-                    </summary>
-                    <div className="agent-markdown px-2 pb-2 text-foreground">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
+    <div className="relative flex-1 overflow-hidden rounded-md border border-border/80 bg-card/75">
+      <div
+        ref={chatRef}
+        data-testid="agent-chat-scroll"
+        className="h-full overflow-auto p-3 sm:p-4"
+        onScroll={() => updatePinnedFromScroll()}
+        onWheel={(event) => {
+          event.stopPropagation();
+        }}
+        onWheelCapture={(event) => {
+          event.stopPropagation();
+        }}
+      >
+        <div className="flex flex-col gap-3 text-xs text-foreground">
+          {chatItems.length === 0 ? (
+            <EmptyStatePanel title="No messages yet." compact className="p-3 text-xs" />
+          ) : (
+            <>
+              {chatItems.map((item, index) => {
+                if (item.kind === "thinking") {
+                  return (
+                    <details
+                      key={`chat-${agentId}-thinking-${index}`}
+                      className="rounded-md border border-border/70 bg-muted/55 text-[11px] text-muted-foreground"
+                      open={autoExpandThinking && index === lastThinkingItemIndex}
+                    >
+                      <summary className="flex cursor-pointer list-none items-center gap-2 px-2 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.11em] [&::-webkit-details-marker]:hidden">
+                        <AgentAvatar
+                          seed={avatarSeed}
+                          name={name}
+                          avatarUrl={avatarUrl}
+                          size={22}
+                        />
+                        <span>Thinking</span>
+                        {status === "running" && item.live ? (
+                          <span className="typing-dots" aria-hidden="true">
+                            <span />
+                            <span />
+                            <span />
+                          </span>
+                        ) : null}
+                      </summary>
+                      <div className="agent-markdown px-2 pb-2 text-foreground">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
+                      </div>
+                    </details>
+                  );
+                }
+                if (item.kind === "user") {
+                  return (
+                    <div
+                      key={`chat-${agentId}-user-${index}`}
+                      className="rounded-md border border-border/70 bg-muted/70 px-3 py-2 text-foreground"
+                    >
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{`> ${item.text}`}</ReactMarkdown>
                     </div>
-                  </details>
-                );
-              }
-              if (item.kind === "user") {
+                  );
+                }
+                if (item.kind === "tool") {
+                  const { summaryText, body } = summarizeToolLabel(item.text);
+                  return (
+                    <details
+                      key={`chat-${agentId}-tool-${index}`}
+                      className="rounded-md border border-border/70 bg-muted/55 px-2 py-1 text-[11px] text-muted-foreground"
+                    >
+                      <summary className="cursor-pointer select-none font-mono text-[10px] font-semibold uppercase tracking-[0.11em]">
+                        {summaryText}
+                      </summary>
+                      {body ? (
+                        <div className="agent-markdown mt-1 text-foreground">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+                        </div>
+                      ) : null}
+                    </details>
+                  );
+                }
                 return (
                   <div
-                    key={`chat-${agentId}-user-${index}`}
-                    className="rounded-md border border-border/70 bg-muted/70 px-3 py-2 text-foreground"
+                    key={`chat-${agentId}-assistant-${index}`}
+                    className={`agent-markdown rounded-md border border-transparent px-0.5 ${item.live ? "opacity-85" : ""}`}
                   >
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{`> ${item.text}`}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
                   </div>
                 );
-              }
-              if (item.kind === "tool") {
-                const { summaryText, body } = summarizeToolLabel(item.text);
-                return (
-                  <details
-                    key={`chat-${agentId}-tool-${index}`}
-                    className="rounded-md border border-border/70 bg-muted/55 px-2 py-1 text-[11px] text-muted-foreground"
-                  >
-                    <summary className="cursor-pointer select-none font-mono text-[10px] font-semibold uppercase tracking-[0.11em]">
-                      {summaryText}
-                    </summary>
-                    {body ? (
-                      <div className="agent-markdown mt-1 text-foreground">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
-                      </div>
-                    ) : null}
-                  </details>
-                );
-              }
-              return (
+              })}
+              {showTypingIndicator ? (
                 <div
-                  key={`chat-${agentId}-assistant-${index}`}
-                  className={`agent-markdown rounded-md border border-transparent px-0.5 ${item.live ? "opacity-85" : ""}`}
+                  className="flex items-center gap-2 rounded-md border border-border/70 bg-muted/55 px-2 py-1.5 text-[11px] text-muted-foreground"
+                  role="status"
+                  aria-live="polite"
+                  data-testid="agent-typing-indicator"
                 >
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
+                  <AgentAvatar seed={avatarSeed} name={name} avatarUrl={avatarUrl} size={22} />
+                  <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.11em]">
+                    Thinking
+                  </span>
+                  <span className="typing-dots" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
                 </div>
-              );
-            })}
-            {showTypingIndicator ? (
-              <div
-                className="flex items-center gap-2 rounded-md border border-border/70 bg-muted/55 px-2 py-1.5 text-[11px] text-muted-foreground"
-                role="status"
-                aria-live="polite"
-                data-testid="agent-typing-indicator"
-              >
-                <AgentAvatar seed={avatarSeed} name={name} avatarUrl={avatarUrl} size={22} />
-                <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.11em]">
-                  Thinking
-                </span>
-                <span className="typing-dots" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                </span>
-              </div>
-            ) : null}
-            <div ref={chatBottomRef} />
-          </>
-        )}
+              ) : null}
+              <div ref={chatBottomRef} />
+            </>
+          )}
+        </div>
       </div>
+
+      {!isPinned && hasUnseen ? (
+        <button
+          type="button"
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md border border-border/80 bg-card/95 px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground shadow-sm transition hover:bg-muted/70"
+          onClick={() => {
+            setPinned(true);
+            setHasUnseen(false);
+            scrollChatToBottom();
+          }}
+          aria-label="Jump to latest"
+        >
+          Jump to latest
+        </button>
+      ) : null}
     </div>
   );
 });
@@ -570,6 +665,8 @@ export const AgentChatPanel = ({
           lastThinkingItemIndex={lastThinkingItemIndex}
           showTypingIndicator={showTypingIndicator}
           outputLineCount={agent.outputLines.length}
+          liveAssistantCharCount={agent.streamText?.length ?? 0}
+          liveThinkingCharCount={agent.thinkingTrace?.length ?? 0}
           scrollToBottomNextOutputRef={scrollToBottomNextOutputRef}
         />
 
