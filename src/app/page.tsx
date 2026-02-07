@@ -45,6 +45,7 @@ import {
   type AgentEventPayload,
   type ChatEventPayload,
   type SummaryPreviewSnapshot,
+  type SummarySnapshotAgent,
   type SummaryStatusSnapshot,
   dedupeRunLines,
   getAgentSummaryPatch,
@@ -277,6 +278,7 @@ const AgentStudioPage = () => {
   const [showConnectionPanel, setShowConnectionPanel] = useState(false);
   const [focusFilter, setFocusFilter] = useState<FocusFilter>("all");
   const [focusedPreferencesLoaded, setFocusedPreferencesLoaded] = useState(false);
+  const [agentsLoadedOnce, setAgentsLoadedOnce] = useState(false);
   const [heartbeatTick, setHeartbeatTick] = useState(0);
   const historyInFlightRef = useRef<Set<string>>(new Set());
   const stateRef = useRef(state);
@@ -727,11 +729,74 @@ const AgentStudioPage = () => {
           patch: { sessionCreated: true },
         });
       }
+
+      try {
+        const activeAgents: SummarySnapshotAgent[] = [];
+        for (const seed of seeds) {
+          const existingSessions = sessionKeysByAgent.get(seed.agentId);
+          if (!existingSessions?.has(seed.sessionKey)) continue;
+          activeAgents.push({
+            agentId: seed.agentId,
+            sessionKey: seed.sessionKey,
+            status: "idle",
+          });
+        }
+        const sessionKeys = Array.from(
+          new Set(
+            activeAgents
+              .map((agent) => agent.sessionKey)
+              .filter((key): key is string => typeof key === "string" && key.trim().length > 0)
+          )
+        ).slice(0, 64);
+        if (sessionKeys.length > 0) {
+          const [statusSummary, previewResult] = await Promise.all([
+            client.call<SummaryStatusSnapshot>("status", {}),
+            client.call<SummaryPreviewSnapshot>("sessions.preview", {
+              keys: sessionKeys,
+              limit: 8,
+              maxChars: 240,
+            }),
+          ]);
+          const patches = buildSummarySnapshotPatches({
+            agents: activeAgents,
+            statusSummary,
+            previewResult,
+          });
+          const assistantAtByAgentId = new Map<string, number>();
+          for (const entry of patches) {
+            if (typeof entry.patch.lastAssistantMessageAt === "number") {
+              assistantAtByAgentId.set(entry.agentId, entry.patch.lastAssistantMessageAt);
+            }
+          }
+          for (const entry of patches) {
+            dispatch({
+              type: "updateAgent",
+              agentId: entry.agentId,
+              patch: entry.patch,
+            });
+          }
+
+          let bestAgentId: string | null = seeds[0]?.agentId ?? null;
+          let bestTs = bestAgentId ? (assistantAtByAgentId.get(bestAgentId) ?? 0) : 0;
+          for (const seed of seeds) {
+            const ts = assistantAtByAgentId.get(seed.agentId) ?? 0;
+            if (ts <= bestTs) continue;
+            bestTs = ts;
+            bestAgentId = seed.agentId;
+          }
+          if (bestAgentId) {
+            dispatch({ type: "selectAgent", agentId: bestAgentId });
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load initial summary snapshot.", err);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load agents.";
       setError(message);
     } finally {
       setLoading(false);
+      setAgentsLoadedOnce(true);
     }
   }, [
     client,
@@ -747,6 +812,11 @@ const AgentStudioPage = () => {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    if (status === "connected") return;
+    setAgentsLoadedOnce(false);
+  }, [gatewayUrl, status]);
 
 	  useEffect(() => {
 	    if (status !== "connected") return;
@@ -811,10 +881,6 @@ const AgentStudioPage = () => {
         const preference = resolveFocusedPreference(settings, key);
         if (preference) {
           setFocusFilter(preference.filter);
-          dispatch({
-            type: "selectAgent",
-            agentId: preference.selectedAgentId,
-          });
           return;
         }
         setFocusFilter("all");
@@ -830,7 +896,7 @@ const AgentStudioPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [dispatch, gatewayUrl, settingsCoordinator]);
+  }, [gatewayUrl, settingsCoordinator]);
 
   useEffect(() => {
     return () => {
@@ -847,13 +913,12 @@ const AgentStudioPage = () => {
           [key]: {
             mode: "focused",
             filter: focusFilter,
-            selectedAgentId: stateRef.current.selectedAgentId,
           },
         },
       },
       300
     );
-  }, [focusFilter, focusedPreferencesLoaded, gatewayUrl, state.selectedAgentId, settingsCoordinator]);
+  }, [focusFilter, focusedPreferencesLoaded, gatewayUrl, settingsCoordinator]);
 
   useEffect(() => {
     if (status !== "connected" || !focusedPreferencesLoaded) return;
@@ -2219,10 +2284,34 @@ const AgentStudioPage = () => {
         : status === "connected"
           ? "Gateway is back online, syncing agents"
           : "Gateway restart in progress"
-    : null;
+      : null;
+
+  if (status === "connecting" || (status === "connected" && !agentsLoadedOnce)) {
+    return (
+      <div className="relative min-h-screen w-screen overflow-hidden bg-background">
+        <div className="flex min-h-screen items-center justify-center px-6">
+          <div className="glass-panel w-full max-w-md px-6 py-6 text-center">
+            <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              OpenClaw Studio
+            </div>
+            <div className="mt-3 text-sm text-muted-foreground">
+              {status === "connecting" ? "Connecting to gateway…" : "Loading agents…"}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative min-h-screen w-screen overflow-hidden bg-background">
+      {state.loading ? (
+        <div className="pointer-events-none fixed bottom-4 left-0 right-0 z-50 flex justify-center px-3">
+          <div className="glass-panel px-6 py-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+            Loading agents…
+          </div>
+        </div>
+      ) : null}
       <div className="relative z-10 flex h-screen flex-col gap-4 px-3 py-3 sm:px-4 sm:py-4 md:px-6 md:py-6">
         <div className="w-full">
           <HeaderBar
@@ -2233,14 +2322,6 @@ const AgentStudioPage = () => {
             brainDisabled={!hasAnyAgents}
           />
         </div>
-
-        {state.loading ? (
-          <div className="w-full">
-            <div className="glass-panel px-6 py-6 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-              Loading agents…
-            </div>
-          </div>
-        ) : null}
 
         {connectionPanelVisible ? (
           <div className="w-full">

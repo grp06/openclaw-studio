@@ -94,7 +94,7 @@ type Action =
 const initialState: AgentStoreState = {
   agents: [],
   selectedAgentId: null,
-  loading: true,
+  loading: false,
   error: null,
 };
 
