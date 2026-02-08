@@ -155,4 +155,30 @@ describe("agent state route", () => {
       ])
     );
   });
+
+  it("uses configured ssh target without studio settings", async () => {
+    process.env.OPENCLAW_TASK_CONTROL_PLANE_SSH_TARGET = "me@host.test";
+
+    mockedSpawnSync.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ trashDir: "/home/ubuntu/.openclaw/trash/x", moved: [] }),
+      stderr: "",
+      error: undefined,
+    } as never);
+
+    const response = await POST(
+      new Request("http://localhost/api/gateway/agent-state", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agentId: "my-agent" }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockedSpawnSync).toHaveBeenCalledTimes(1);
+
+    const [cmd, args] = mockedSpawnSync.mock.calls[0] as [string, string[]];
+    expect(cmd).toBe("ssh");
+    expect(args).toEqual(expect.arrayContaining(["me@host.test"]));
+  });
 });

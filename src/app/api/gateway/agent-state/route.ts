@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { resolveGatewaySshTarget, runSshJson } from "@/lib/ssh/gateway-host";
+import { resolveGatewaySshTargetFromGatewayUrl, runSshJson } from "@/lib/ssh/gateway-host";
+import { loadStudioSettings } from "@/lib/studio/settings-store";
 
 export const runtime = "nodejs";
 
@@ -113,6 +114,11 @@ print(json.dumps({"restored": moves}))
 PY
 `;
 
+const resolveAgentStateSshTarget = (): string => {
+  const settings = loadStudioSettings();
+  return resolveGatewaySshTargetFromGatewayUrl(settings.gateway?.url ?? "", process.env);
+};
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as unknown;
@@ -128,7 +134,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Invalid agentId: ${trimmed}` }, { status: 400 });
     }
 
-    const sshTarget = resolveGatewaySshTarget();
+    const sshTarget = resolveAgentStateSshTarget();
     const result = runSshJson({
       sshTarget,
       argv: ["bash", "-s", "--", trimmed],
@@ -163,7 +169,7 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: `Invalid agentId: ${trimmedAgent}` }, { status: 400 });
     }
 
-    const sshTarget = resolveGatewaySshTarget();
+    const sshTarget = resolveAgentStateSshTarget();
     const result = runSshJson({
       sshTarget,
       argv: ["bash", "-s", "--", trimmedAgent, trimmedTrash],
