@@ -6,7 +6,7 @@ import {
   GatewayResponseError,
   GatewayStatus,
 } from "./GatewayClient";
-import { getStudioSettingsCoordinator } from "@/lib/studio/coordinator";
+import type { StudioSettings, StudioSettingsPatch } from "@/lib/studio/settings";
 
 const DEFAULT_GATEWAY_URL =
   process.env.NEXT_PUBLIC_GATEWAY_URL ?? "ws://127.0.0.1:18789";
@@ -33,9 +33,16 @@ export type GatewayConnectionState = {
   clearError: () => void;
 };
 
-export const useGatewayConnection = (): GatewayConnectionState => {
+type StudioSettingsCoordinatorLike = {
+  loadSettings: () => Promise<StudioSettings | null>;
+  schedulePatch: (patch: StudioSettingsPatch, debounceMs?: number) => void;
+  flushPending: () => Promise<void>;
+};
+
+export const useGatewayConnection = (
+  settingsCoordinator: StudioSettingsCoordinatorLike
+): GatewayConnectionState => {
   const [client] = useState(() => new GatewayClient());
-  const [settingsCoordinator] = useState(() => getStudioSettingsCoordinator());
   const didAutoConnect = useRef(false);
   const loadedGatewaySettings = useRef<{ gatewayUrl: string; token: string } | null>(
     null
@@ -95,10 +102,9 @@ export const useGatewayConnection = (): GatewayConnectionState => {
 
   useEffect(() => {
     return () => {
-      void settingsCoordinator.flushPending();
       client.disconnect();
     };
-  }, [client, settingsCoordinator]);
+  }, [client]);
 
   const connect = useCallback(async () => {
     setError(null);

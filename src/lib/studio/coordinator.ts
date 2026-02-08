@@ -139,8 +139,6 @@ export class StudioSettingsCoordinator {
   }
 }
 
-let studioSettingsCoordinator: StudioSettingsCoordinator | null = null;
-
 export const fetchStudioSettings = async (): Promise<StudioSettingsResponse> => {
   return fetchJson<StudioSettingsResponse>("/api/studio", { cache: "no-store" });
 };
@@ -155,19 +153,14 @@ export const updateStudioSettings = async (
   });
 };
 
-export const getStudioSettingsCoordinator = (): StudioSettingsCoordinator => {
-  if (studioSettingsCoordinator) {
-    return studioSettingsCoordinator;
-  }
-  studioSettingsCoordinator = new StudioSettingsCoordinator({
+export const createStudioSettingsCoordinator = (options?: {
+  debounceMs?: number;
+}): StudioSettingsCoordinator => {
+  return new StudioSettingsCoordinator(
+    {
     fetchSettings: fetchStudioSettings,
     updateSettings: updateStudioSettings,
-  });
-  return studioSettingsCoordinator;
-};
-
-export const resetStudioSettingsCoordinator = () => {
-  if (!studioSettingsCoordinator) return;
-  studioSettingsCoordinator.dispose();
-  studioSettingsCoordinator = null;
+    },
+    options?.debounceMs
+  );
 };

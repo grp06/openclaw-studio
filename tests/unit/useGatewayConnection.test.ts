@@ -37,16 +37,12 @@ const setupAndImportHook = async (gatewayUrl: string | null) => {
     return { GatewayClient, GatewayResponseError };
   });
 
-  vi.doMock("@/lib/studio/coordinator", () => ({
-    getStudioSettingsCoordinator: () => ({
-      loadSettings: async () => null,
-      schedulePatch: () => {},
-      flushPending: async () => {},
-    }),
-  }));
-
   const mod = await import("@/lib/gateway/useGatewayConnection");
-  return mod.useGatewayConnection as () => { gatewayUrl: string };
+  return mod.useGatewayConnection as (settingsCoordinator: {
+    loadSettings: () => Promise<unknown>;
+    schedulePatch: (patch: unknown) => void;
+    flushPending: () => Promise<void>;
+  }) => { gatewayUrl: string };
 };
 
 describe("useGatewayConnection", () => {
@@ -59,9 +55,18 @@ describe("useGatewayConnection", () => {
 
   it("defaults_to_env_url_when_set", async () => {
     const useGatewayConnection = await setupAndImportHook("ws://example.test:1234");
+    const coordinator = {
+      loadSettings: async () => null,
+      schedulePatch: () => {},
+      flushPending: async () => {},
+    };
 
     const Probe = () =>
-      createElement("div", { "data-testid": "gatewayUrl" }, useGatewayConnection().gatewayUrl);
+      createElement(
+        "div",
+        { "data-testid": "gatewayUrl" },
+        useGatewayConnection(coordinator).gatewayUrl
+      );
 
     render(createElement(Probe));
 
@@ -72,9 +77,18 @@ describe("useGatewayConnection", () => {
 
   it("falls_back_to_local_default_when_env_unset", async () => {
     const useGatewayConnection = await setupAndImportHook(null);
+    const coordinator = {
+      loadSettings: async () => null,
+      schedulePatch: () => {},
+      flushPending: async () => {},
+    };
 
     const Probe = () =>
-      createElement("div", { "data-testid": "gatewayUrl" }, useGatewayConnection().gatewayUrl);
+      createElement(
+        "div",
+        { "data-testid": "gatewayUrl" },
+        useGatewayConnection(coordinator).gatewayUrl
+      );
 
     render(createElement(Probe));
 
@@ -83,4 +97,3 @@ describe("useGatewayConnection", () => {
     });
   });
 });
-

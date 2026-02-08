@@ -83,7 +83,7 @@ import {
   isSameSessionKey,
 } from "@/lib/gateway/sessionKeys";
 import { buildAvatarDataUrl } from "@/lib/avatars/multiavatar";
-import { getStudioSettingsCoordinator } from "@/lib/studio/coordinator";
+import { createStudioSettingsCoordinator } from "@/lib/studio/coordinator";
 import { resolveAgentAvatarSeed, resolveFocusedPreference } from "@/lib/studio/settings";
 import { applySessionSettingMutation } from "@/features/agents/state/sessionSettingsMutations";
 import {
@@ -273,7 +273,7 @@ const resolveNextNewAgentName = (agents: AgentState[]) => {
 };
 
 const AgentStudioPage = () => {
-  const [settingsCoordinator] = useState(() => getStudioSettingsCoordinator());
+  const [settingsCoordinator] = useState(() => createStudioSettingsCoordinator());
   const {
     client,
     status,
@@ -284,7 +284,7 @@ const AgentStudioPage = () => {
     disconnect,
     setGatewayUrl,
     setToken,
-  } = useGatewayConnection();
+  } = useGatewayConnection(settingsCoordinator);
 
   const { state, dispatch, hydrateAgents, setError, setLoading } = useAgentStore();
   const [showConnectionPanel, setShowConnectionPanel] = useState(false);
