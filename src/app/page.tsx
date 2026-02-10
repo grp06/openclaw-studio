@@ -11,7 +11,6 @@ import { HeaderBar } from "@/features/agents/components/HeaderBar";
 import { ConnectionPanel } from "@/features/agents/components/ConnectionPanel";
 import { EmptyStatePanel } from "@/features/agents/components/EmptyStatePanel";
 import {
-  buildAgentInstruction,
   extractText,
   isHeartbeatPrompt,
   stripUiMetadata,
@@ -67,12 +66,12 @@ import {
   isSameSessionKey,
   parseAgentIdFromSessionKey,
   isGatewayDisconnectLikeError,
-  syncGatewaySessionSettings,
   type EventFrame,
 } from "@/lib/gateway/GatewayClient";
 import { fetchJson } from "@/lib/http";
 import { bootstrapAgentBrainFilesFromTemplate } from "@/lib/gateway/agentFiles";
 import { deleteAgentViaStudio } from "@/features/agents/operations/deleteAgentOperation";
+import { sendChatMessageViaStudio } from "@/features/agents/operations/chatSendOperation";
 
 type ChatHistoryMessage = Record<string, unknown>;
 
@@ -1598,88 +1597,16 @@ const AgentStudioPage = () => {
         pendingDraftTimersRef.current.delete(agentId);
       }
       pendingDraftValuesRef.current.delete(agentId);
-      const isResetCommand = /^\/(reset|new)(\s|$)/i.test(trimmed);
-      const runId = crypto.randomUUID();
-      runtimeEventHandlerRef.current?.clearRunTracking(runId);
-      const agent = stateRef.current.agents.find((entry) => entry.agentId === agentId);
-      if (!agent) {
-        dispatch({
-          type: "appendOutput",
-          agentId,
-          line: "Error: Agent not found.",
-        });
-        return;
-      }
-      if (isResetCommand) {
-        dispatch({
-          type: "updateAgent",
-          agentId,
-          patch: { outputLines: [], streamText: null, thinkingTrace: null, lastResult: null },
-        });
-      }
-      dispatch({
-        type: "updateAgent",
+      await sendChatMessageViaStudio({
+        client,
+        dispatch,
+        getAgent: (agentId) =>
+          stateRef.current.agents.find((entry) => entry.agentId === agentId) ?? null,
         agentId,
-        patch: {
-          status: "running",
-          runId,
-          streamText: "",
-          thinkingTrace: null,
-          draft: "",
-          lastUserMessage: trimmed,
-          lastActivityAt: Date.now(),
-        },
+        sessionKey,
+        message: trimmed,
+        clearRunTracking: (runId) => runtimeEventHandlerRef.current?.clearRunTracking(runId),
       });
-      dispatch({
-        type: "appendOutput",
-        agentId,
-        line: `> ${trimmed}`,
-      });
-      try {
-        if (!sessionKey) {
-          throw new Error("Missing session key for agent.");
-        }
-        let createdSession = agent.sessionCreated;
-        if (!agent.sessionSettingsSynced) {
-          await syncGatewaySessionSettings({
-            client,
-            sessionKey,
-            model: agent.model ?? null,
-            thinkingLevel: agent.thinkingLevel ?? null,
-          });
-          createdSession = true;
-          dispatch({
-            type: "updateAgent",
-            agentId,
-            patch: { sessionSettingsSynced: true, sessionCreated: true },
-          });
-        }
-        await client.call("chat.send", {
-          sessionKey,
-          message: buildAgentInstruction({ message: trimmed }),
-          deliver: false,
-          idempotencyKey: runId,
-        });
-        if (!createdSession) {
-          dispatch({
-            type: "updateAgent",
-            agentId,
-            patch: { sessionCreated: true },
-          });
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Gateway error";
-        dispatch({
-          type: "updateAgent",
-          agentId,
-          patch: { status: "error", runId: null, streamText: null, thinkingTrace: null },
-        });
-        dispatch({
-          type: "appendOutput",
-          agentId,
-          line: `Error: ${msg}`,
-        });
-      }
     },
     [client, dispatch]
   );
