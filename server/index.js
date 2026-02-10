@@ -1,6 +1,7 @@
 const http = require("node:http");
 const next = require("next");
 
+const { createAccessGate } = require("./access-gate");
 const { createGatewayProxy } = require("./gateway-proxy");
 const { loadUpstreamGatewaySettings } = require("./studio-settings");
 
@@ -31,17 +32,26 @@ async function main() {
   const app = next({ dev, hostname, port });
   const handle = app.getRequestHandler();
 
+  const accessGate = createAccessGate({
+    token: process.env.STUDIO_ACCESS_TOKEN,
+  });
+
   const proxy = createGatewayProxy({
     loadUpstreamSettings: async () => {
       const settings = loadUpstreamGatewaySettings(process.env);
       return { url: settings.url, token: settings.token };
     },
-    allowWs: (req) => resolvePathname(req.url) === "/api/gateway/ws",
+    allowWs: (req) => {
+      if (resolvePathname(req.url) !== "/api/gateway/ws") return false;
+      if (!accessGate.allowUpgrade(req)) return false;
+      return true;
+    },
   });
 
   await app.prepare();
 
   const server = http.createServer((req, res) => {
+    if (accessGate.handleHttp(req, res)) return;
     handle(req, res);
   });
 
@@ -59,4 +69,3 @@ main().catch((err) => {
   console.error(err);
   process.exitCode = 1;
 });
-
