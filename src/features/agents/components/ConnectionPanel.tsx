@@ -60,7 +60,7 @@ export const ConnectionPanel = ({
       </div>
       <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
         <label className="flex flex-col gap-1 font-mono text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
-          Gateway URL
+          Upstream Gateway URL
           <input
             className="h-10 rounded-md border border-input bg-background/75 px-4 font-sans text-sm text-foreground outline-none transition focus:border-ring"
             type="text"
@@ -71,7 +71,7 @@ export const ConnectionPanel = ({
           />
         </label>
         <label className="flex flex-col gap-1 font-mono text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
-          Token
+          Upstream Token
           <input
             className="h-10 rounded-md border border-input bg-background/75 px-4 font-sans text-sm text-foreground outline-none transition focus:border-ring"
             type="password"

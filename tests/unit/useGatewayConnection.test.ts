@@ -15,6 +15,8 @@ const setupAndImportHook = async (gatewayUrl: string | null) => {
   vi.resetModules();
   vi.spyOn(console, "info").mockImplementation(() => {});
 
+  const captured: { url: string | null; token: unknown } = { url: null, token: null };
+
   vi.doMock("../../src/lib/gateway/openclaw/GatewayBrowserClient", () => {
     class GatewayBrowserClient {
       connected = false;
@@ -26,6 +28,8 @@ const setupAndImportHook = async (gatewayUrl: string | null) => {
       };
 
       constructor(opts: Record<string, unknown>) {
+        captured.url = typeof opts.url === "string" ? opts.url : null;
+        captured.token = "token" in opts ? opts.token : null;
         this.opts = {
           onHello: typeof opts.onHello === "function" ? (opts.onHello as (hello: unknown) => void) : undefined,
           onEvent: typeof opts.onEvent === "function" ? (opts.onEvent as (event: unknown) => void) : undefined,
@@ -55,11 +59,14 @@ const setupAndImportHook = async (gatewayUrl: string | null) => {
   });
 
   const mod = await import("@/lib/gateway/GatewayClient");
-  return mod.useGatewayConnection as (settingsCoordinator: {
+  return {
+    useGatewayConnection: mod.useGatewayConnection as (settingsCoordinator: {
     loadSettings: () => Promise<unknown>;
     schedulePatch: (patch: unknown) => void;
     flushPending: () => Promise<void>;
-  }) => { gatewayUrl: string };
+  }) => { gatewayUrl: string },
+    captured,
+  };
 };
 
 describe("useGatewayConnection", () => {
@@ -71,7 +78,7 @@ describe("useGatewayConnection", () => {
   });
 
   it("defaults_to_env_url_when_set", async () => {
-    const useGatewayConnection = await setupAndImportHook("ws://example.test:1234");
+    const { useGatewayConnection } = await setupAndImportHook("ws://example.test:1234");
     const coordinator = {
       loadSettings: async () => null,
       schedulePatch: () => {},
@@ -93,7 +100,7 @@ describe("useGatewayConnection", () => {
   });
 
   it("falls_back_to_local_default_when_env_unset", async () => {
-    const useGatewayConnection = await setupAndImportHook(null);
+    const { useGatewayConnection } = await setupAndImportHook(null);
     const coordinator = {
       loadSettings: async () => null,
       schedulePatch: () => {},
@@ -112,5 +119,26 @@ describe("useGatewayConnection", () => {
     await waitFor(() => {
       expect(screen.getByTestId("gatewayUrl")).toHaveTextContent("ws://127.0.0.1:18789");
     });
+  });
+
+  it("connects_via_studio_proxy_ws_and_does_not_pass_token", async () => {
+    const { useGatewayConnection, captured } = await setupAndImportHook(null);
+    const coordinator = {
+      loadSettings: async () => null,
+      schedulePatch: () => {},
+      flushPending: async () => {},
+    };
+
+    const Probe = () => {
+      useGatewayConnection(coordinator);
+      return createElement("div", null, "ok");
+    };
+
+    render(createElement(Probe));
+
+    await waitFor(() => {
+      expect(captured.url).toBe("ws://localhost:3000/api/gateway/ws");
+    });
+    expect(captured.token).toBe("");
   });
 });

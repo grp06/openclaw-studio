@@ -6,6 +6,7 @@ import {
   type GatewayHelloOk,
 } from "./openclaw/GatewayBrowserClient";
 import type { StudioSettings, StudioSettingsPatch } from "@/lib/studio/settings";
+import { resolveStudioProxyGatewayUrl } from "@/lib/gateway/proxy-url";
 
 export type ReqFrame = {
   type: "req";
@@ -68,7 +69,7 @@ export const isSameSessionKey = (a: string, b: string) => {
   return left.length > 0 && left === right;
 };
 
-const DEFAULT_GATEWAY_URL =
+const DEFAULT_UPSTREAM_GATEWAY_URL =
   process.env.NEXT_PUBLIC_GATEWAY_URL || "ws://127.0.0.1:18789";
 
 type StatusHandler = (status: GatewayStatus) => void;
@@ -333,7 +334,7 @@ export const useGatewayConnection = (
   const didAutoConnect = useRef(false);
   const loadedGatewaySettings = useRef<{ gatewayUrl: string; token: string } | null>(null);
 
-  const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_GATEWAY_URL);
+  const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_UPSTREAM_GATEWAY_URL);
   const [token, setToken] = useState("");
   const [status, setStatus] = useState<GatewayStatus>("disconnected");
   const [error, setError] = useState<string | null>(null);
@@ -346,7 +347,7 @@ export const useGatewayConnection = (
         const settings = await settingsCoordinator.loadSettings();
         const gateway = settings?.gateway ?? null;
         if (cancelled) return;
-        const nextGatewayUrl = gateway?.url?.trim() ? gateway.url : DEFAULT_GATEWAY_URL;
+        const nextGatewayUrl = gateway?.url?.trim() ? gateway.url : DEFAULT_UPSTREAM_GATEWAY_URL;
         const nextToken = typeof gateway?.token === "string" ? gateway.token : "";
         loadedGatewaySettings.current = {
           gatewayUrl: nextGatewayUrl.trim(),
@@ -354,15 +355,16 @@ export const useGatewayConnection = (
         };
         setGatewayUrl(nextGatewayUrl);
         setToken(nextToken);
-      } catch {
+      } catch (err) {
         if (!cancelled) {
-          setError("Failed to load gateway settings.");
+          const message = err instanceof Error ? err.message : "Failed to load gateway settings.";
+          setError(message);
         }
       } finally {
         if (!cancelled) {
           if (!loadedGatewaySettings.current) {
             loadedGatewaySettings.current = {
-              gatewayUrl: DEFAULT_GATEWAY_URL.trim(),
+              gatewayUrl: DEFAULT_UPSTREAM_GATEWAY_URL.trim(),
               token: "",
             };
           }
@@ -394,11 +396,15 @@ export const useGatewayConnection = (
   const connect = useCallback(async () => {
     setError(null);
     try {
-      await client.connect({ gatewayUrl, token });
+      await settingsCoordinator.flushPending();
+      await client.connect({
+        gatewayUrl: resolveStudioProxyGatewayUrl(),
+        token: "",
+      });
     } catch (err) {
       setError(formatGatewayError(err));
     }
-  }, [client, gatewayUrl, token]);
+  }, [client, settingsCoordinator]);
 
   useEffect(() => {
     if (didAutoConnect.current) return;
