@@ -40,9 +40,10 @@ const formatDurationLabel = (durationMs: number): string => {
   return `${Math.round(seconds)}s`;
 };
 
-const ASSISTANT_RAIL_COL_CLASS = "w-[148px]";
-const ASSISTANT_MAX_WIDTH_DEFAULT_CLASS = "max-w-[64ch]";
-const ASSISTANT_MAX_WIDTH_EXPANDED_CLASS = "max-w-[88ch]";
+const SPINE_LEFT = "left-[15px]";
+const ASSISTANT_GUTTER_CLASS = "pl-[44px]";
+const ASSISTANT_MAX_WIDTH_DEFAULT_CLASS = "max-w-[68ch]";
+const ASSISTANT_MAX_WIDTH_EXPANDED_CLASS = "max-w-[1120px]";
 
 const looksLikePath = (value: string): boolean => {
   if (!value) return false;
@@ -131,7 +132,7 @@ const ThinkingDetailsRow = memo(function ThinkingDetailsRow({
 }) {
   if (!thinkingText.trim()) return null;
   return (
-    <details className="group rounded-md border border-border/60 bg-muted/25 px-2 py-1.5 text-[11px] text-muted-foreground/90">
+    <details className="group rounded-md border border-border/50 bg-muted/20 px-2 py-1.5 text-[11px] text-muted-foreground/90">
       <summary className="flex cursor-pointer list-none items-center gap-2 opacity-70 [&::-webkit-details-marker]:hidden">
         <ChevronRight className="h-3 w-3 shrink-0 transition group-open:rotate-90" />
         <span className="flex min-w-0 items-center gap-2">
@@ -216,19 +217,15 @@ const AssistantMessageCard = memo(function AssistantMessageCard({
     streaming || !contentText ? { intro: null, artifact: null, artifactOnly: false } : splitArtifactContent(contentText);
 
   return (
-    <div className="grid w-full grid-cols-[148px_minmax(0,1fr)] items-stretch gap-3 self-start">
-      <div className={`relative flex ${ASSISTANT_RAIL_COL_CLASS} flex-col`}>
-        <div className="flex items-center gap-2">
+    <div className="w-full self-start">
+      <div className={`relative w-full ${widthClass} ${ASSISTANT_GUTTER_CLASS}`}>
+        <div className="absolute left-[4px] top-[2px]">
           <AgentAvatar seed={avatarSeed} name={name} avatarUrl={avatarUrl} size={22} />
+        </div>
+        <div className="flex items-center justify-between gap-3 py-0.5">
           <div className="min-w-0 truncate font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground/90">
             {name}
           </div>
-        </div>
-        <div aria-hidden className="ml-[11px] mt-2 flex-1 bg-border/40" style={{ width: 1 }} />
-      </div>
-
-      <div className={`w-full ${widthClass} justify-self-start overflow-hidden rounded-md border border-border/70 bg-muted/25`}>
-        <div className="flex items-center justify-end gap-3 bg-muted/45 px-3 py-1.5">
           {resolvedTimestamp !== null ? (
             <time className="shrink-0 rounded-full border border-border/60 bg-card/60 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/90">
               {formatChatTimestamp(resolvedTimestamp)}
@@ -236,7 +233,7 @@ const AssistantMessageCard = memo(function AssistantMessageCard({
           ) : null}
         </div>
 
-        <div className="flex flex-col gap-3 px-3 py-2">
+        <div className="mt-2 rounded-md border border-border/60 bg-muted/15 px-3 py-2">
           {streaming ? (
             <div
               className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-[11px] text-muted-foreground/90"
@@ -276,14 +273,14 @@ const AssistantMessageCard = memo(function AssistantMessageCard({
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{intro}</ReactMarkdown>
                   </div>
                 ) : null}
-                <div className="rounded-md border border-border/60 bg-card/45 px-3 py-2">
+                <div className="group rounded-md border border-border/55 bg-card/35 px-3 py-2">
                   <div className="flex items-center justify-between gap-3 pb-2">
                     <div className="min-w-0 truncate font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/90">
                       Output
                     </div>
                     <button
                       type="button"
-                      className="rounded-md border border-border/60 bg-card/60 p-1.5 text-muted-foreground transition hover:bg-muted/50"
+                      className="rounded-md border border-border/60 bg-card/60 p-1.5 text-muted-foreground opacity-0 transition hover:bg-muted/50 group-hover:opacity-100"
                       aria-label="Extract output"
                       title="Copy output"
                       onClick={() => {
@@ -394,14 +391,10 @@ const AgentChatFinalItems = memo(function AgentChatFinalItems({
         if (block.kind === "tool") {
           const { summaryText, body } = summarizeToolLabel(block.text);
           return (
-            <div
+            <details
               key={`chat-${agentId}-tool-${index}`}
-              className="grid w-full grid-cols-[148px_minmax(0,1fr)] items-start gap-3 self-start"
+              className={`w-full ${ASSISTANT_MAX_WIDTH_EXPANDED_CLASS} ${ASSISTANT_GUTTER_CLASS} self-start rounded-md border border-border/60 bg-muted/15 px-2 py-1 text-[11px] text-muted-foreground`}
             >
-              <div aria-hidden className={ASSISTANT_RAIL_COL_CLASS} />
-              <details
-                className={`w-full ${ASSISTANT_MAX_WIDTH_EXPANDED_CLASS} justify-self-start rounded-md border border-border/70 bg-muted/20 px-2 py-1 text-[11px] text-muted-foreground`}
-              >
                 <summary className="cursor-pointer select-none font-mono text-[10px] font-semibold uppercase tracking-[0.11em]">
                   {summaryText}
                 </summary>
@@ -410,8 +403,7 @@ const AgentChatFinalItems = memo(function AgentChatFinalItems({
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
                   </div>
                 ) : null}
-              </details>
-            </div>
+            </details>
           );
         }
         const streaming = running && index === blocks.length - 1 && !block.text;
@@ -558,7 +550,8 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
           event.stopPropagation();
         }}
       >
-        <div className="flex flex-col gap-3 text-xs text-foreground">
+        <div className="relative flex flex-col gap-3 text-xs text-foreground">
+          <div aria-hidden className={`pointer-events-none absolute ${SPINE_LEFT} top-0 bottom-0 w-px bg-border/40`} />
           {chatItems.length === 0 ? (
             <EmptyStatePanel title="No messages yet." compact className="p-3 text-xs" />
           ) : (
