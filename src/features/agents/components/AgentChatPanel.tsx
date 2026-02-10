@@ -14,7 +14,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChevronRight, Clock, Cog, Copy, Shuffle } from "lucide-react";
 import type { GatewayModelChoice } from "@/lib/gateway/models";
-import { isToolMarkdown, isTraceMarkdown } from "@/lib/text/message-extract";
+import { isTraceMarkdown } from "@/lib/text/message-extract";
 import { isNearBottom } from "@/lib/dom";
 import { AgentAvatar } from "./AgentAvatar";
 import {
@@ -461,6 +461,7 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
   const scrollFrameRef = useRef<number | null>(null);
   const pinnedRef = useRef(true);
   const [isPinned, setIsPinned] = useState(true);
+  const [nowMs, setNowMs] = useState<number | null>(null);
 
   const scrollChatToBottom = useCallback(() => {
     if (!chatRef.current) return;
@@ -536,6 +537,24 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
     };
   }, []);
 
+  const showLiveAssistantCard = Boolean(liveThinkingText || liveAssistantText || showTypingIndicator);
+
+  useEffect(() => {
+    if (status !== "running" || typeof runStartedAt !== "number" || !showLiveAssistantCard) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setNowMs(Date.now());
+    }, 0);
+    const intervalId = window.setInterval(() => setNowMs(Date.now()), 250);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.clearInterval(intervalId);
+    };
+  }, [runStartedAt, showLiveAssistantCard, status]);
+
   return (
     <div className="relative flex-1 overflow-hidden rounded-md border border-border/80 bg-card/75">
       <div
@@ -573,7 +592,9 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
                   timestampMs={runStartedAt ?? undefined}
                   thinkingText={liveThinkingText || null}
                   thinkingDurationMs={
-                    typeof runStartedAt === "number" ? Math.max(0, Date.now() - runStartedAt) : undefined
+                    typeof runStartedAt === "number" && typeof nowMs === "number"
+                      ? Math.max(0, nowMs - runStartedAt)
+                      : undefined
                   }
                   showTypingIndicator={showTypingIndicator}
                   contentText={liveAssistantText || null}
