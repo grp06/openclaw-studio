@@ -195,11 +195,7 @@ test("focused_preferences_persist_across_reload", async ({ page }) => {
   );
   await page.goto("/");
   await initialSettingsLoad;
-  await page.waitForResponse(
-    (response) =>
-      response.url().includes("/api/studio") &&
-      response.request().method() === "PUT"
-  );
+  await expect(page.getByTestId("fleet-sidebar")).toBeVisible();
 
   const focusedPersist = page.waitForResponse((response) => {
     if (!response.url().includes("/api/studio")) return false;

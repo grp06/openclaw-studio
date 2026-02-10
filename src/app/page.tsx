@@ -69,6 +69,8 @@ import { bootstrapAgentBrainFilesFromTemplate } from "@/lib/gateway/agentFiles";
 import { deleteAgentViaStudio } from "@/features/agents/operations/deleteAgentOperation";
 import { sendChatMessageViaStudio } from "@/features/agents/operations/chatSendOperation";
 import { hydrateAgentFleetFromGateway } from "@/features/agents/operations/agentFleetHydration";
+import { useConfigMutationQueue } from "@/features/agents/operations/useConfigMutationQueue";
+import { useGatewayRestartBlock } from "@/features/agents/operations/useGatewayRestartBlock";
 
 type ChatHistoryMessage = Record<string, unknown>;
 
@@ -117,15 +119,6 @@ type RenameAgentBlockState = {
   phase: RenameAgentBlockPhase;
   startedAt: number;
   sawDisconnect: boolean;
-};
-type ConfigMutationKind = "create-agent" | "rename-agent" | "delete-agent";
-type QueuedConfigMutation = {
-  id: string;
-  kind: ConfigMutationKind;
-  label: string;
-  run: () => Promise<void>;
-  resolve: () => void;
-  reject: (error: unknown) => void;
 };
 
 const RESERVED_MAIN_AGENT_ID = "main";
@@ -224,10 +217,6 @@ const AgentStudioPage = () => {
   const [deleteAgentBlock, setDeleteAgentBlock] = useState<DeleteAgentBlockState | null>(null);
   const [createAgentBlock, setCreateAgentBlock] = useState<CreateAgentBlockState | null>(null);
   const [renameAgentBlock, setRenameAgentBlock] = useState<RenameAgentBlockState | null>(null);
-  const [queuedConfigMutations, setQueuedConfigMutations] = useState<QueuedConfigMutation[]>([]);
-  const [activeConfigMutation, setActiveConfigMutation] = useState<QueuedConfigMutation | null>(
-    null
-  );
   const specialUpdateRef = useRef<Map<string, string>>(new Map());
   const specialUpdateInFlightRef = useRef<Set<string>>(new Set());
   const pendingDraftValuesRef = useRef<Map<string, string>>(new Map());
@@ -276,7 +265,19 @@ const AgentStudioPage = () => {
     [agents]
   );
   const hasRunningAgents = runningAgentCount > 0;
-  const queuedConfigMutationCount = queuedConfigMutations.length;
+
+  const hasRestartBlockInProgress = Boolean(
+    (deleteAgentBlock && deleteAgentBlock.phase !== "queued") ||
+      (createAgentBlock && createAgentBlock.phase !== "queued") ||
+      (renameAgentBlock && renameAgentBlock.phase !== "queued")
+  );
+
+  const { enqueueConfigMutation, queuedCount: queuedConfigMutationCount, activeConfigMutation } =
+    useConfigMutationQueue({
+      status,
+      hasRunningAgents,
+      hasRestartBlockInProgress,
+    });
 
   const flushPendingDraft = useCallback(
     (agentId: string | null) => {
@@ -349,26 +350,6 @@ const AgentStudioPage = () => {
     pendingLivePatchesRef.current.set(key, existing ? { ...existing, ...patch } : patch);
     livePatchBatcherRef.current.schedule();
   }, []);
-
-  const enqueueConfigMutation = useCallback(
-    (params: {
-      kind: ConfigMutationKind;
-      label: string;
-      run: () => Promise<void>;
-    }) =>
-      new Promise<void>((resolve, reject) => {
-        const queued: QueuedConfigMutation = {
-          id: crypto.randomUUID(),
-          kind: params.kind,
-          label: params.label,
-          run: params.run,
-          resolve,
-          reject,
-        };
-        setQueuedConfigMutations((current) => [...current, queued]);
-      }),
-    []
-  );
 
   useEffect(() => {
     const selector = 'link[data-agent-favicon="true"]';
@@ -610,48 +591,6 @@ const AgentStudioPage = () => {
     setAgentsLoadedOnce(false);
   }, [gatewayUrl, status]);
 
-	  useEffect(() => {
-	    if (status !== "connected") return;
-	    if (activeConfigMutation) return;
-	    if (deleteAgentBlock && deleteAgentBlock.phase !== "queued") return;
-	    if (createAgentBlock && createAgentBlock.phase !== "queued") return;
-	    if (renameAgentBlock && renameAgentBlock.phase !== "queued") return;
-	    if (hasRunningAgents) return;
-	    const next = queuedConfigMutations[0];
-	    if (!next) return;
-	    setQueuedConfigMutations((current) => current.slice(1));
-	    setActiveConfigMutation(next);
-	  }, [
-	    activeConfigMutation,
-	    createAgentBlock,
-	    deleteAgentBlock,
-	    renameAgentBlock,
-	    hasRunningAgents,
-	    queuedConfigMutations,
-	    status,
-	  ]);
-
-  useEffect(() => {
-    if (!activeConfigMutation) return;
-    let mounted = true;
-    const run = async () => {
-      try {
-        await activeConfigMutation.run();
-        activeConfigMutation.resolve();
-      } catch (error) {
-        activeConfigMutation.reject(error);
-      } finally {
-        if (mounted) {
-          setActiveConfigMutation(null);
-        }
-      }
-    };
-    void run();
-    return () => {
-      mounted = false;
-    };
-  }, [activeConfigMutation]);
-
   useEffect(() => {
     let cancelled = false;
     const key = gatewayUrl.trim();
@@ -698,7 +637,8 @@ const AgentStudioPage = () => {
 
   useEffect(() => {
     const key = gatewayUrl.trim();
-    if (!focusedPreferencesLoaded || !key) return;
+    if (!key) return;
+    if (!focusFilterTouchedRef.current) return;
     settingsCoordinator.schedulePatch(
       {
         focused: {
@@ -710,7 +650,7 @@ const AgentStudioPage = () => {
       },
       300
     );
-  }, [focusFilter, focusedPreferencesLoaded, gatewayUrl, settingsCoordinator]);
+  }, [focusFilter, gatewayUrl, settingsCoordinator]);
 
   useEffect(() => {
     if (status !== "connected" || !focusedPreferencesLoaded) return;
@@ -1031,47 +971,22 @@ const AgentStudioPage = () => {
     ]
   );
 
-  useEffect(() => {
-    if (!deleteAgentBlock || deleteAgentBlock.phase !== "awaiting-restart") return;
-    if (status !== "connected") {
-      if (!deleteAgentBlock.sawDisconnect) {
-        setDeleteAgentBlock((current) => {
-          if (!current || current.phase !== "awaiting-restart" || current.sawDisconnect) {
-            return current;
-          }
-          return { ...current, sawDisconnect: true };
-        });
-      }
-      return;
-    }
-    if (!deleteAgentBlock.sawDisconnect) return;
-    let cancelled = false;
-    const finalize = async () => {
-      await loadAgents();
-      if (cancelled) return;
-      setDeleteAgentBlock(null);
-      setMobilePane("chat");
-    };
-    void finalize();
-    return () => {
-      cancelled = true;
-    };
-  }, [deleteAgentBlock, loadAgents, status]);
-
-  useEffect(() => {
-    if (!deleteAgentBlock) return;
-    if (deleteAgentBlock.phase === "queued") return;
-    const maxWaitMs = 90_000;
-    const elapsed = Date.now() - deleteAgentBlock.startedAt;
-    const remaining = Math.max(0, maxWaitMs - elapsed);
-    const timeoutId = window.setTimeout(() => {
+  useGatewayRestartBlock({
+    status,
+    block: deleteAgentBlock,
+    setBlock: setDeleteAgentBlock,
+    maxWaitMs: 90_000,
+    onTimeout: () => {
       setDeleteAgentBlock(null);
       setError("Gateway restart timed out after deleting the agent.");
-    }, remaining);
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [deleteAgentBlock, setError]);
+    },
+    onRestartComplete: async (_, ctx) => {
+      await loadAgents();
+      if (ctx.isCancelled()) return;
+      setDeleteAgentBlock(null);
+      setMobilePane("chat");
+    },
+  });
 
   const handleRunCronJob = useCallback(
     async (agentId: string, jobId: string) => {
@@ -1240,107 +1155,57 @@ const AgentStudioPage = () => {
     status,
   ]);
 
-  useEffect(() => {
-    if (!createAgentBlock || createAgentBlock.phase !== "awaiting-restart") return;
-    if (status !== "connected") {
-      if (!createAgentBlock.sawDisconnect) {
-        setCreateAgentBlock((current) => {
-          if (!current || current.phase !== "awaiting-restart" || current.sawDisconnect) {
-            return current;
-          }
-          return { ...current, sawDisconnect: true };
-        });
-      }
-      return;
-    }
-	    if (!createAgentBlock.sawDisconnect) return;
-	    let cancelled = false;
-	    const finalize = async () => {
-	      await loadAgents();
-	      if (cancelled) return;
-	      const newAgentId = createAgentBlock.agentId?.trim() ?? "";
-	      if (newAgentId) {
-	        dispatch({ type: "selectAgent", agentId: newAgentId });
-	        setCreateAgentBlock((current) => {
-	          if (!current || current.agentId !== newAgentId) return current;
-	          return { ...current, phase: "bootstrapping-files" };
-	        });
-	        try {
-	          await bootstrapAgentBrainFilesFromTemplate({ client, agentId: newAgentId });
-	        } catch (err) {
-	          const message =
-	            err instanceof Error
-	              ? err.message
-	              : "Failed to bootstrap brain files for the new agent.";
-	          console.error(message, err);
-	          setError(message);
-	        }
-	      }
-	      setCreateAgentBlock(null);
-	      setMobilePane("chat");
-	    };
-	    void finalize();
-	    return () => {
-	      cancelled = true;
-	    };
-	  }, [client, createAgentBlock, dispatch, loadAgents, setError, status]);
-
-  useEffect(() => {
-    if (!createAgentBlock) return;
-    if (createAgentBlock.phase === "queued") return;
-    const maxWaitMs = 90_000;
-    const elapsed = Date.now() - createAgentBlock.startedAt;
-    const remaining = Math.max(0, maxWaitMs - elapsed);
-    const timeoutId = window.setTimeout(() => {
+  useGatewayRestartBlock({
+    status,
+    block: createAgentBlock,
+    setBlock: setCreateAgentBlock,
+    maxWaitMs: 90_000,
+    onTimeout: () => {
       setCreateAgentBlock(null);
       setError("Gateway restart timed out after creating the agent.");
-    }, remaining);
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [createAgentBlock, setError]);
-
-  useEffect(() => {
-    if (!renameAgentBlock || renameAgentBlock.phase !== "awaiting-restart") return;
-    if (status !== "connected") {
-      if (!renameAgentBlock.sawDisconnect) {
-        setRenameAgentBlock((current) => {
-          if (!current || current.phase !== "awaiting-restart" || current.sawDisconnect) {
-            return current;
-          }
-          return { ...current, sawDisconnect: true };
-        });
-      }
-      return;
-    }
-    if (!renameAgentBlock.sawDisconnect) return;
-    let cancelled = false;
-    const finalize = async () => {
+    },
+    onRestartComplete: async (block, ctx) => {
       await loadAgents();
-      if (cancelled) return;
-      setRenameAgentBlock(null);
+      if (ctx.isCancelled()) return;
+      const newAgentId = block.agentId?.trim() ?? "";
+      if (newAgentId) {
+        dispatch({ type: "selectAgent", agentId: newAgentId });
+        setCreateAgentBlock((current) => {
+          if (!current || current.agentId !== newAgentId) return current;
+          return { ...current, phase: "bootstrapping-files" };
+        });
+        try {
+          await bootstrapAgentBrainFilesFromTemplate({ client, agentId: newAgentId });
+        } catch (err) {
+          const message =
+            err instanceof Error
+              ? err.message
+              : "Failed to bootstrap brain files for the new agent.";
+          console.error(message, err);
+          setError(message);
+        }
+      }
+      setCreateAgentBlock(null);
       setMobilePane("chat");
-    };
-    void finalize();
-    return () => {
-      cancelled = true;
-    };
-  }, [loadAgents, renameAgentBlock, status]);
+    },
+  });
 
-  useEffect(() => {
-    if (!renameAgentBlock) return;
-    if (renameAgentBlock.phase === "queued") return;
-    const maxWaitMs = 90_000;
-    const elapsed = Date.now() - renameAgentBlock.startedAt;
-    const remaining = Math.max(0, maxWaitMs - elapsed);
-    const timeoutId = window.setTimeout(() => {
+  useGatewayRestartBlock({
+    status,
+    block: renameAgentBlock,
+    setBlock: setRenameAgentBlock,
+    maxWaitMs: 90_000,
+    onTimeout: () => {
       setRenameAgentBlock(null);
       setError("Gateway restart timed out after renaming the agent.");
-    }, remaining);
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [renameAgentBlock, setError]);
+    },
+    onRestartComplete: async (_, ctx) => {
+      await loadAgents();
+      if (ctx.isCancelled()) return;
+      setRenameAgentBlock(null);
+      setMobilePane("chat");
+    },
+  });
 
   const handleNewSession = useCallback(
     async (agentId: string) => {
@@ -1660,7 +1525,6 @@ const AgentStudioPage = () => {
 
   const connectionPanelVisible = showConnectionPanel;
   const hasAnyAgents = agents.length > 0;
-  const showFleetLayout = hasAnyAgents || status === "connected";
   const configMutationStatusLine = activeConfigMutation
     ? `Applying config change: ${activeConfigMutation.label}`
     : queuedConfigMutationCount > 0
@@ -1775,199 +1639,180 @@ const AgentStudioPage = () => {
           </div>
         ) : null}
 
-        {showFleetLayout ? (
-          <div className="flex min-h-0 flex-1 flex-col gap-4 xl:flex-row">
-            <div className="glass-panel p-2 xl:hidden" data-testid="mobile-pane-toggle">
-              <div className="grid grid-cols-4 gap-2">
-                <button
-                  type="button"
-                  className={`rounded-md border px-2 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.13em] transition ${
-                    mobilePane === "fleet"
-                      ? "border-border bg-muted text-foreground shadow-xs"
-                      : "border-border/80 bg-card/65 text-muted-foreground hover:border-border hover:bg-muted/70"
-                  }`}
-                  onClick={() => setMobilePane("fleet")}
-                >
-                  Fleet
-                </button>
-                <button
-                  type="button"
-                  className={`rounded-md border px-2 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.13em] transition ${
-                    mobilePane === "chat"
-                      ? "border-border bg-muted text-foreground shadow-xs"
-                      : "border-border/80 bg-card/65 text-muted-foreground hover:border-border hover:bg-muted/70"
-                  }`}
-                  onClick={() => setMobilePane("chat")}
-                >
-                  Chat
-                </button>
-                <button
-                  type="button"
-                  className={`rounded-md border px-2 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.13em] transition ${
-                    mobilePane === "settings"
-                      ? "border-border bg-muted text-foreground shadow-xs"
-                      : "border-border/80 bg-card/65 text-muted-foreground hover:border-border hover:bg-muted/70"
-                  }`}
-                  onClick={() => setMobilePane("settings")}
-                  disabled={!settingsAgent}
-                >
-                  Settings
-                </button>
-                <button
-                  type="button"
-                  className={`rounded-md border px-2 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.13em] transition ${
-                    mobilePane === "brain"
-                      ? "border-border bg-muted text-foreground shadow-xs"
-                      : "border-border/80 bg-card/65 text-muted-foreground hover:border-border hover:bg-muted/70"
-                  }`}
-                  onClick={() => {
-                    setBrainPanelOpen(true);
-                    setSettingsAgentId(null);
-                    setMobilePane("brain");
-                  }}
-                  disabled={!hasAnyAgents}
-                >
-                  Brain
-                </button>
-              </div>
-            </div>
-            <div
-              className={`${mobilePane === "fleet" ? "block" : "hidden"} min-h-0 xl:block xl:min-h-0`}
-            >
-              <FleetSidebar
-                agents={filteredAgents}
-                selectedAgentId={focusedAgent?.agentId ?? state.selectedAgentId}
-                filter={focusFilter}
-                onFilterChange={handleFocusFilterChange}
-                onCreateAgent={() => {
-                  void handleCreateAgent();
+        <div className="flex min-h-0 flex-1 flex-col gap-4 xl:flex-row">
+          <div className="glass-panel p-2 xl:hidden" data-testid="mobile-pane-toggle">
+            <div className="grid grid-cols-4 gap-2">
+              <button
+                type="button"
+                className={`rounded-md border px-2 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.13em] transition ${
+                  mobilePane === "fleet"
+                    ? "border-border bg-muted text-foreground shadow-xs"
+                    : "border-border/80 bg-card/65 text-muted-foreground hover:border-border hover:bg-muted/70"
+                }`}
+                onClick={() => setMobilePane("fleet")}
+              >
+                Fleet
+              </button>
+              <button
+                type="button"
+                className={`rounded-md border px-2 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.13em] transition ${
+                  mobilePane === "chat"
+                    ? "border-border bg-muted text-foreground shadow-xs"
+                    : "border-border/80 bg-card/65 text-muted-foreground hover:border-border hover:bg-muted/70"
+                }`}
+                onClick={() => setMobilePane("chat")}
+              >
+                Chat
+              </button>
+              <button
+                type="button"
+                className={`rounded-md border px-2 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.13em] transition ${
+                  mobilePane === "settings"
+                    ? "border-border bg-muted text-foreground shadow-xs"
+                    : "border-border/80 bg-card/65 text-muted-foreground hover:border-border hover:bg-muted/70"
+                }`}
+                onClick={() => setMobilePane("settings")}
+                disabled={!settingsAgent}
+              >
+                Settings
+              </button>
+              <button
+                type="button"
+                className={`rounded-md border px-2 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.13em] transition ${
+                  mobilePane === "brain"
+                    ? "border-border bg-muted text-foreground shadow-xs"
+                    : "border-border/80 bg-card/65 text-muted-foreground hover:border-border hover:bg-muted/70"
+                }`}
+                onClick={() => {
+                  setBrainPanelOpen(true);
+                  setSettingsAgentId(null);
+                  setMobilePane("brain");
                 }}
-                createDisabled={status !== "connected" || createAgentBusy || state.loading}
-                createBusy={createAgentBusy}
-                onSelectAgent={(agentId) => {
-                  flushPendingDraft(focusedAgent?.agentId ?? null);
-                  dispatch({ type: "selectAgent", agentId });
+                disabled={!hasAnyAgents}
+              >
+                Brain
+              </button>
+            </div>
+          </div>
+          <div
+            className={`${mobilePane === "fleet" ? "block" : "hidden"} min-h-0 xl:block xl:min-h-0`}
+          >
+            <FleetSidebar
+              agents={filteredAgents}
+              selectedAgentId={focusedAgent?.agentId ?? state.selectedAgentId}
+              filter={focusFilter}
+              onFilterChange={handleFocusFilterChange}
+              onCreateAgent={() => {
+                void handleCreateAgent();
+              }}
+              createDisabled={status !== "connected" || createAgentBusy || state.loading}
+              createBusy={createAgentBusy}
+              onSelectAgent={(agentId) => {
+                flushPendingDraft(focusedAgent?.agentId ?? null);
+                dispatch({ type: "selectAgent", agentId });
+                setMobilePane("chat");
+              }}
+            />
+          </div>
+          <div
+            className={`${mobilePane === "chat" ? "flex" : "hidden"} glass-panel min-h-0 flex-1 overflow-hidden p-2 sm:p-3 xl:flex`}
+            data-testid="focused-agent-panel"
+          >
+            {focusedAgent ? (
+              <AgentChatPanel
+                agent={focusedAgent}
+                isSelected={false}
+                canSend={status === "connected"}
+                models={gatewayModels}
+                stopBusy={stopBusyAgentId === focusedAgent.agentId}
+                onOpenSettings={() => handleOpenAgentSettings(focusedAgent.agentId)}
+                onModelChange={(value) =>
+                  handleModelChange(focusedAgent.agentId, focusedAgent.sessionKey, value)
+                }
+                onThinkingChange={(value) =>
+                  handleThinkingChange(focusedAgent.agentId, focusedAgent.sessionKey, value)
+                }
+                onDraftChange={(value) => handleDraftChange(focusedAgent.agentId, value)}
+                onSend={(message) =>
+                  handleSend(focusedAgent.agentId, focusedAgent.sessionKey, message)
+                }
+                onStopRun={() => handleStopRun(focusedAgent.agentId, focusedAgent.sessionKey)}
+                onAvatarShuffle={() => handleAvatarShuffle(focusedAgent.agentId)}
+              />
+            ) : (
+              <EmptyStatePanel
+                title={hasAnyAgents ? "No agents match this filter." : "No agents available."}
+                description={
+                  hasAnyAgents
+                    ? undefined
+                    : status === "connected"
+                      ? "Use New Agent in the sidebar to add your first agent."
+                      : "Connect to your gateway to load agents into the studio."
+                }
+                fillHeight
+                className="items-center p-6 text-center text-sm"
+              />
+            )}
+          </div>
+          {brainPanelOpen ? (
+            <div
+              className={`${mobilePane === "brain" ? "block" : "hidden"} glass-panel min-h-0 w-full shrink-0 overflow-hidden p-0 xl:block xl:min-w-[360px] xl:max-w-[430px]`}
+            >
+              <AgentBrainPanel
+                client={client}
+                agents={agents}
+                selectedAgentId={selectedBrainAgentId}
+                onClose={() => {
+                  setBrainPanelOpen(false);
                   setMobilePane("chat");
                 }}
               />
             </div>
+          ) : null}
+          {settingsAgent ? (
             <div
-              className={`${mobilePane === "chat" ? "flex" : "hidden"} glass-panel min-h-0 flex-1 overflow-hidden p-2 sm:p-3 xl:flex`}
-              data-testid="focused-agent-panel"
+              className={`${mobilePane === "settings" ? "block" : "hidden"} glass-panel min-h-0 w-full shrink-0 overflow-hidden p-0 xl:block xl:min-w-[360px] xl:max-w-[430px]`}
             >
-              {focusedAgent ? (
-                <AgentChatPanel
-                  agent={focusedAgent}
-                  isSelected={false}
-                  canSend={status === "connected"}
-                  models={gatewayModels}
-                  stopBusy={stopBusyAgentId === focusedAgent.agentId}
-                  onOpenSettings={() => handleOpenAgentSettings(focusedAgent.agentId)}
-                  onModelChange={(value) =>
-                    handleModelChange(focusedAgent.agentId, focusedAgent.sessionKey, value)
-                  }
-                  onThinkingChange={(value) =>
-                    handleThinkingChange(focusedAgent.agentId, focusedAgent.sessionKey, value)
-                  }
-                  onDraftChange={(value) =>
-                    handleDraftChange(focusedAgent.agentId, value)
-                  }
-                  onSend={(message) =>
-                    handleSend(
-                      focusedAgent.agentId,
-                      focusedAgent.sessionKey,
-                      message
-                    )
-                  }
-                  onStopRun={() =>
-                    handleStopRun(focusedAgent.agentId, focusedAgent.sessionKey)
-                  }
-                  onAvatarShuffle={() => handleAvatarShuffle(focusedAgent.agentId)}
-                />
-              ) : (
-                <EmptyStatePanel
-                  title={hasAnyAgents ? "No agents match this filter." : "No agents available."}
-                  description={
-                    hasAnyAgents
-                      ? undefined
-                      : "Use New Agent in the sidebar to add your first agent."
-                  }
-                  fillHeight
-                  className="items-center p-6 text-center text-sm"
-                />
-              )}
+              <AgentSettingsPanel
+                key={settingsAgent.agentId}
+                agent={settingsAgent}
+                onClose={() => {
+                  setSettingsAgentId(null);
+                  setMobilePane("chat");
+                }}
+                onRename={(name) => handleRenameAgent(settingsAgent.agentId, name)}
+                onNewSession={() => handleNewSession(settingsAgent.agentId)}
+                onDelete={() => handleDeleteAgent(settingsAgent.agentId)}
+                canDelete={settingsAgent.agentId !== RESERVED_MAIN_AGENT_ID}
+                onToolCallingToggle={(enabled) =>
+                  handleToolCallingToggle(settingsAgent.agentId, enabled)
+                }
+                onThinkingTracesToggle={(enabled) =>
+                  handleThinkingTracesToggle(settingsAgent.agentId, enabled)
+                }
+                cronJobs={settingsCronJobs}
+                cronLoading={settingsCronLoading}
+                cronError={settingsCronError}
+                cronRunBusyJobId={cronRunBusyJobId}
+                cronDeleteBusyJobId={cronDeleteBusyJobId}
+                onRunCronJob={(jobId) => handleRunCronJob(settingsAgent.agentId, jobId)}
+                onDeleteCronJob={(jobId) => handleDeleteCronJob(settingsAgent.agentId, jobId)}
+                heartbeats={settingsHeartbeats}
+                heartbeatLoading={settingsHeartbeatLoading}
+                heartbeatError={settingsHeartbeatError}
+                heartbeatRunBusyId={heartbeatRunBusyId}
+                heartbeatDeleteBusyId={heartbeatDeleteBusyId}
+                onRunHeartbeat={(heartbeatId) =>
+                  handleRunHeartbeat(settingsAgent.agentId, heartbeatId)
+                }
+                onDeleteHeartbeat={(heartbeatId) =>
+                  handleDeleteHeartbeat(settingsAgent.agentId, heartbeatId)
+                }
+              />
             </div>
-            {brainPanelOpen ? (
-              <div
-                className={`${mobilePane === "brain" ? "block" : "hidden"} glass-panel min-h-0 w-full shrink-0 overflow-hidden p-0 xl:block xl:min-w-[360px] xl:max-w-[430px]`}
-              >
-                <AgentBrainPanel
-                  client={client}
-                  agents={agents}
-                  selectedAgentId={selectedBrainAgentId}
-                  onClose={() => {
-                    setBrainPanelOpen(false);
-                    setMobilePane("chat");
-                  }}
-                />
-              </div>
-            ) : null}
-            {settingsAgent ? (
-              <div
-                className={`${mobilePane === "settings" ? "block" : "hidden"} glass-panel min-h-0 w-full shrink-0 overflow-hidden p-0 xl:block xl:min-w-[360px] xl:max-w-[430px]`}
-              >
-                <AgentSettingsPanel
-                  key={settingsAgent.agentId}
-                  agent={settingsAgent}
-                  onClose={() => {
-                    setSettingsAgentId(null);
-                    setMobilePane("chat");
-                  }}
-                  onRename={(name) => handleRenameAgent(settingsAgent.agentId, name)}
-                  onNewSession={() => handleNewSession(settingsAgent.agentId)}
-                  onDelete={() => handleDeleteAgent(settingsAgent.agentId)}
-                  canDelete={settingsAgent.agentId !== RESERVED_MAIN_AGENT_ID}
-                  onToolCallingToggle={(enabled) =>
-                    handleToolCallingToggle(settingsAgent.agentId, enabled)
-                  }
-                  onThinkingTracesToggle={(enabled) =>
-                    handleThinkingTracesToggle(settingsAgent.agentId, enabled)
-                  }
-                  cronJobs={settingsCronJobs}
-                  cronLoading={settingsCronLoading}
-                  cronError={settingsCronError}
-                  cronRunBusyJobId={cronRunBusyJobId}
-                  cronDeleteBusyJobId={cronDeleteBusyJobId}
-                  onRunCronJob={(jobId) => handleRunCronJob(settingsAgent.agentId, jobId)}
-                  onDeleteCronJob={(jobId) => handleDeleteCronJob(settingsAgent.agentId, jobId)}
-                  heartbeats={settingsHeartbeats}
-                  heartbeatLoading={settingsHeartbeatLoading}
-                  heartbeatError={settingsHeartbeatError}
-                  heartbeatRunBusyId={heartbeatRunBusyId}
-                  heartbeatDeleteBusyId={heartbeatDeleteBusyId}
-                  onRunHeartbeat={(heartbeatId) =>
-                    handleRunHeartbeat(settingsAgent.agentId, heartbeatId)
-                  }
-                  onDeleteHeartbeat={(heartbeatId) =>
-                    handleDeleteHeartbeat(settingsAgent.agentId, heartbeatId)
-                  }
-                />
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <div className="glass-panel fade-up-delay flex min-h-0 flex-1 flex-col overflow-hidden p-5 sm:p-6">
-            <EmptyStatePanel
-              label="Fleet"
-              title="No agents available"
-              description="Connect to your gateway to load agents into the studio."
-              detail={gatewayUrl || "Gateway URL is empty"}
-              fillHeight
-              className="items-center px-6 py-10 text-center"
-            />
-          </div>
-	        )}
-	      </div>
+          ) : null}
+        </div>
+      </div>
       {createAgentBlock && createAgentBlock.phase !== "queued" ? (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-background/70 backdrop-blur-sm"
