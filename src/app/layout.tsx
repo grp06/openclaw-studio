@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Bebas_Neue, IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
+import { AppNav } from "@/components/AppNav";
 
 export const metadata: Metadata = {
   title: "OpenClaw Studio",
@@ -41,7 +42,10 @@ export default function RootLayout({
         />
       </head>
       <body className={`${display.variable} ${sans.variable} ${mono.variable} antialiased`}>
-        {children}
+        <div className="flex h-screen overflow-hidden">
+          <AppNav />
+          <main className="flex-1 overflow-auto">{children}</main>
+        </div>
       </body>
     </html>
   );
