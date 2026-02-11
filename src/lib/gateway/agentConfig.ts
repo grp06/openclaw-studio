@@ -95,7 +95,7 @@ export const upsertConfigAgentEntry = (
   return { list: nextList, entry: updatedEntry };
 };
 
-const slugifyName = (name: string): string => {
+export const slugifyAgentName = (name: string): string => {
   const slug = name
     .trim()
     .toLowerCase()
@@ -357,7 +357,7 @@ export const createGatewayAgent = async (params: {
       `Gateway config path "${configPath}" is missing a directory; cannot compute workspace.`,
     );
   }
-  const idGuess = slugifyName(trimmed);
+  const idGuess = slugifyAgentName(trimmed);
   const workspace = joinPathLike(stateDir, `workspace-${idGuess}`);
 
   const result = (await params.client.call("agents.create", {

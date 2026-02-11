@@ -55,6 +55,7 @@ import {
   renameGatewayAgent,
   removeGatewayHeartbeatOverride,
   listHeartbeatsForAgent,
+  slugifyAgentName,
   triggerHeartbeatNow,
   type AgentHeartbeatSummary,
 } from "@/lib/gateway/agentConfig";
@@ -166,14 +167,21 @@ const findLatestHeartbeatResponse = (messages: ChatHistoryMessage[]) => {
 
 const resolveNextNewAgentName = (agents: AgentState[]) => {
   const baseName = "New Agent";
-  const existing = new Set(
+  const existingNames = new Set(
     agents.map((agent) => agent.name.trim().toLowerCase()).filter((name) => name.length > 0)
   );
+  const existingIds = new Set(
+    agents
+      .map((agent) => agent.agentId.trim().toLowerCase())
+      .filter((agentId) => agentId.length > 0)
+  );
   const baseLower = baseName.toLowerCase();
-  if (!existing.has(baseLower)) return baseName;
+  if (!existingNames.has(baseLower) && !existingIds.has(slugifyAgentName(baseName))) return baseName;
   for (let index = 2; index < 10000; index += 1) {
     const candidate = `${baseName} ${index}`;
-    if (!existing.has(candidate.toLowerCase())) return candidate;
+    if (existingNames.has(candidate.toLowerCase())) continue;
+    if (existingIds.has(slugifyAgentName(candidate))) continue;
+    return candidate;
   }
   throw new Error("Unable to allocate a unique agent name.");
 };
