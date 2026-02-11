@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bell, CalendarDays, ListChecks, Play, Sun, Trash2 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
 import type { AgentState } from "@/features/agents/state/store";
 import type { CronCreateDraft, CronCreateTemplateId } from "@/lib/cron/createPayloadBuilder";
@@ -12,13 +10,14 @@ import type { GatewayClient } from "@/lib/gateway/GatewayClient";
 import type { AgentHeartbeatSummary } from "@/lib/gateway/agentConfig";
 import { readGatewayAgentFile, writeGatewayAgentFile } from "@/lib/gateway/agentFiles";
 import {
-  AGENT_FILE_META,
   AGENT_FILE_NAMES,
-  AGENT_FILE_PLACEHOLDERS,
   createAgentFilesState,
-  isAgentFileName,
-  type AgentFileName,
 } from "@/lib/agents/agentFiles";
+import {
+  parsePersonalityFiles,
+  serializePersonalityFiles,
+  type PersonalityBuilderDraft,
+} from "@/lib/agents/personalityBuilder";
 
 const AgentInspectHeader = ({
   label,
@@ -1024,16 +1023,18 @@ type AgentFilesState = ReturnType<typeof createAgentFilesState>;
 
 type UseAgentFilesEditorResult = {
   agentFiles: AgentFilesState;
-  agentFileTab: AgentFileName;
+  draft: PersonalityBuilderDraft;
   agentFilesLoading: boolean;
   agentFilesSaving: boolean;
   agentFilesDirty: boolean;
   agentFilesError: string | null;
-  setAgentFileContent: (value: string) => void;
-  handleAgentFileTabChange: (nextTab: AgentFileName) => Promise<void>;
+  updateDraft: (updater: (prev: PersonalityBuilderDraft) => PersonalityBuilderDraft) => void;
   saveAgentFiles: () => Promise<boolean>;
   reloadAgentFiles: () => Promise<void>;
 };
+
+const areDraftsEqual = (left: PersonalityBuilderDraft, right: PersonalityBuilderDraft) =>
+  JSON.stringify(left) === JSON.stringify(right);
 
 const useAgentFilesEditor = (params: {
   client: GatewayClient | null | undefined;
@@ -1041,7 +1042,10 @@ const useAgentFilesEditor = (params: {
 }): UseAgentFilesEditorResult => {
   const { client, agentId } = params;
   const [agentFiles, setAgentFiles] = useState(createAgentFilesState);
-  const [agentFileTab, setAgentFileTab] = useState<AgentFileName>(AGENT_FILE_NAMES[0]);
+  const [draft, setDraft] = useState<PersonalityBuilderDraft>(() => parsePersonalityFiles(createAgentFilesState()));
+  const [initialDraft, setInitialDraft] = useState<PersonalityBuilderDraft>(() =>
+    parsePersonalityFiles(createAgentFilesState())
+  );
   const [agentFilesLoading, setAgentFilesLoading] = useState(false);
   const [agentFilesSaving, setAgentFilesSaving] = useState(false);
   const [agentFilesDirty, setAgentFilesDirty] = useState(false);
@@ -1053,7 +1057,11 @@ const useAgentFilesEditor = (params: {
     try {
       const trimmedAgentId = agentId?.trim();
       if (!trimmedAgentId) {
-        setAgentFiles(createAgentFilesState());
+        const emptyState = createAgentFilesState();
+        const emptyDraft = parsePersonalityFiles(emptyState);
+        setAgentFiles(emptyState);
+        setDraft(emptyDraft);
+        setInitialDraft(emptyDraft);
         setAgentFilesDirty(false);
         setAgentFilesError("Agent ID is missing for this agent.");
         return;
@@ -1070,13 +1078,15 @@ const useAgentFilesEditor = (params: {
       );
       const nextState = createAgentFilesState();
       for (const file of results) {
-        if (!isAgentFileName(file.name)) continue;
         nextState[file.name] = {
           content: file.content ?? "",
           exists: Boolean(file.exists),
         };
       }
+      const nextDraft = parsePersonalityFiles(nextState);
       setAgentFiles(nextState);
+      setDraft(nextDraft);
+      setInitialDraft(nextDraft);
       setAgentFilesDirty(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load agent files.";
@@ -1099,24 +1109,28 @@ const useAgentFilesEditor = (params: {
         setAgentFilesError("Gateway client is not available.");
         return false;
       }
+      const serialized = serializePersonalityFiles(draft);
       await Promise.all(
         AGENT_FILE_NAMES.map(async (name) => {
           await writeGatewayAgentFile({
             client,
             agentId: trimmedAgentId,
             name,
-            content: agentFiles[name].content,
+            content: serialized[name],
           });
         })
       );
       const nextState = createAgentFilesState();
       for (const name of AGENT_FILE_NAMES) {
         nextState[name] = {
-          content: agentFiles[name].content,
+          content: serialized[name],
           exists: true,
         };
       }
+      const nextDraft = parsePersonalityFiles(nextState);
       setAgentFiles(nextState);
+      setDraft(nextDraft);
+      setInitialDraft(nextDraft);
       setAgentFilesDirty(false);
       return true;
     } catch (err) {
@@ -1126,50 +1140,31 @@ const useAgentFilesEditor = (params: {
     } finally {
       setAgentFilesSaving(false);
     }
-  }, [agentFiles, agentId, client]);
+  }, [agentId, client, draft]);
 
-  const handleAgentFileTabChange = useCallback(
-    async (nextTab: AgentFileName) => {
-      if (nextTab === agentFileTab) return;
-      if (agentFilesDirty && !agentFilesSaving) {
-        const saved = await saveAgentFiles();
-        if (!saved) return;
-      }
-      setAgentFileTab(nextTab);
+  const updateDraft = useCallback(
+    (updater: (prev: PersonalityBuilderDraft) => PersonalityBuilderDraft) => {
+      setDraft((prev) => updater(prev));
     },
-    [agentFileTab, agentFilesDirty, agentFilesSaving, saveAgentFiles]
+    []
   );
 
-  const setAgentFileContent = useCallback(
-    (value: string) => {
-      setAgentFiles((prev) => ({
-        ...prev,
-        [agentFileTab]: { ...prev[agentFileTab], content: value },
-      }));
-      setAgentFilesDirty(true);
-    },
-    [agentFileTab]
-  );
+  useEffect(() => {
+    setAgentFilesDirty(!areDraftsEqual(draft, initialDraft));
+  }, [draft, initialDraft]);
 
   useEffect(() => {
     void loadAgentFiles();
   }, [loadAgentFiles]);
 
-  useEffect(() => {
-    if (!AGENT_FILE_NAMES.includes(agentFileTab)) {
-      setAgentFileTab(AGENT_FILE_NAMES[0]);
-    }
-  }, [agentFileTab]);
-
   return {
     agentFiles,
-    agentFileTab,
+    draft,
     agentFilesLoading,
     agentFilesSaving,
     agentFilesDirty,
     agentFilesError,
-    setAgentFileContent,
-    handleAgentFileTabChange,
+    updateDraft,
     saveAgentFiles,
     reloadAgentFiles: loadAgentFiles,
   };
@@ -1191,24 +1186,15 @@ export const AgentBrainPanel = ({
 
   const {
     agentFiles,
-    agentFileTab,
+    draft,
     agentFilesLoading,
     agentFilesSaving,
     agentFilesDirty,
     agentFilesError,
-    setAgentFileContent,
-    handleAgentFileTabChange,
+    updateDraft,
     saveAgentFiles,
     reloadAgentFiles,
   } = useAgentFilesEditor({ client, agentId: selectedAgent?.agentId ?? null });
-  const [previewMode, setPreviewMode] = useState(true);
-
-  const handleTabChange = useCallback(
-    async (nextTab: AgentFileName) => {
-      await handleAgentFileTabChange(nextTab);
-    },
-    [handleAgentFileTabChange]
-  );
 
   const handleClose = useCallback(async () => {
     if (agentFilesSaving) return;
@@ -1218,6 +1204,57 @@ export const AgentBrainPanel = ({
     }
     onClose();
   }, [agentFilesDirty, agentFilesSaving, onClose, saveAgentFiles]);
+
+  const setIdentityField = useCallback(
+    (field: keyof PersonalityBuilderDraft["identity"], value: string) => {
+      updateDraft((prev) => ({
+        ...prev,
+        identity: {
+          ...prev.identity,
+          [field]: value,
+        },
+      }));
+    },
+    [updateDraft]
+  );
+
+  const setUserField = useCallback(
+    (field: keyof PersonalityBuilderDraft["user"], value: string) => {
+      updateDraft((prev) => ({
+        ...prev,
+        user: {
+          ...prev.user,
+          [field]: value,
+        },
+      }));
+    },
+    [updateDraft]
+  );
+
+  const setSoulField = useCallback(
+    (field: keyof PersonalityBuilderDraft["soul"], value: string) => {
+      updateDraft((prev) => ({
+        ...prev,
+        soul: {
+          ...prev.soul,
+          [field]: value,
+        },
+      }));
+    },
+    [updateDraft]
+  );
+
+  const setFileField = useCallback(
+    (field: "agents" | "tools" | "heartbeat" | "memory", value: string) => {
+      updateDraft((prev) => ({
+        ...prev,
+        [field]: value,
+      }));
+    },
+    [updateDraft]
+  );
+
+  const inputsDisabled = agentFilesLoading || agentFilesSaving;
 
   return (
     <div
@@ -1239,7 +1276,7 @@ export const AgentBrainPanel = ({
         <section className="flex min-h-0 flex-1 flex-col" data-testid="agent-brain-files">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-              {AGENT_FILE_META[agentFileTab].hint}
+              Guided personality builder
             </div>
           </div>
           {agentFilesError ? (
@@ -1247,29 +1284,6 @@ export const AgentBrainPanel = ({
               {agentFilesError}
             </div>
           ) : null}
-
-          <div className="mt-4 flex flex-wrap items-end gap-2">
-            {AGENT_FILE_NAMES.map((name) => {
-              const active = name === agentFileTab;
-              const label = AGENT_FILE_META[name].title.replace(".md", "");
-              return (
-                <button
-                  key={name}
-                  type="button"
-                  className={`rounded-full border px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition ${
-                    active
-                      ? "border-border bg-surface-3 text-foreground"
-                      : "border-transparent bg-surface-2 text-muted-foreground hover:border-border/80 hover:bg-surface-3"
-                  }`}
-                  onClick={() => {
-                    void handleTabChange(name);
-                  }}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
 
           <div className="mt-3 flex items-center justify-end gap-1">
             <button
@@ -1285,60 +1299,236 @@ export const AgentBrainPanel = ({
             </button>
             <button
               type="button"
-              className={`rounded-md border px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition ${
-                previewMode
-                  ? "border-border bg-surface-3 text-foreground"
-                  : "border-border/70 bg-surface-3 text-muted-foreground hover:bg-surface-2"
-              }`}
-              onClick={() => setPreviewMode(true)}
+              className="rounded-md border border-border/70 bg-surface-3 px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground transition hover:bg-surface-2 disabled:opacity-50"
+              disabled={agentFilesSaving || !agentFilesDirty}
+              onClick={() => {
+                void saveAgentFiles();
+              }}
             >
-              Preview
-            </button>
-            <button
-              type="button"
-              className={`rounded-md border px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition ${
-                previewMode
-                  ? "border-border/70 bg-surface-3 text-muted-foreground hover:bg-surface-2"
-                  : "border-border bg-surface-3 text-foreground"
-              }`}
-              onClick={() => setPreviewMode(false)}
-            >
-              Edit
+              Save
             </button>
           </div>
 
-          <div className="mt-3 min-h-0 flex-1 rounded-md bg-muted/30 p-2">
-            {previewMode ? (
-              <div className="agent-markdown h-full overflow-y-auto rounded-md border border-border/80 bg-surface-3 px-3 py-2 text-xs text-foreground">
-                {agentFiles[agentFileTab].content.trim().length === 0 ? (
-                  <p className="text-muted-foreground">
-                    {AGENT_FILE_PLACEHOLDERS[agentFileTab]}
-                  </p>
-                ) : (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {agentFiles[agentFileTab].content}
-                  </ReactMarkdown>
-                )}
+          <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-md border border-border/80 bg-muted/20 p-2">
+            <div className="space-y-3">
+              <div className="rounded-md border border-border/80 bg-surface-3 p-3">
+                <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  Identity (IDENTITY.md)
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span>Identity name</span>
+                    <input
+                      aria-label="Identity name"
+                      className="h-9 rounded-md border border-border/80 bg-surface-2 px-2 text-xs text-foreground outline-none"
+                      value={draft.identity.name}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setIdentityField("name", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span>Creature</span>
+                    <input
+                      className="h-9 rounded-md border border-border/80 bg-surface-2 px-2 text-xs text-foreground outline-none"
+                      value={draft.identity.creature}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setIdentityField("creature", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span>Vibe</span>
+                    <input
+                      className="h-9 rounded-md border border-border/80 bg-surface-2 px-2 text-xs text-foreground outline-none"
+                      value={draft.identity.vibe}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setIdentityField("vibe", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span>Emoji</span>
+                    <input
+                      className="h-9 rounded-md border border-border/80 bg-surface-2 px-2 text-xs text-foreground outline-none"
+                      value={draft.identity.emoji}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setIdentityField("emoji", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground sm:col-span-2">
+                    <span>Avatar</span>
+                    <input
+                      className="h-9 rounded-md border border-border/80 bg-surface-2 px-2 text-xs text-foreground outline-none"
+                      value={draft.identity.avatar}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setIdentityField("avatar", event.target.value)}
+                    />
+                  </label>
+                </div>
               </div>
-            ) : (
-              <textarea
-                className="h-full min-h-0 w-full resize-none overflow-y-auto rounded-md border border-border/80 bg-surface-3 px-3 py-2 font-mono text-xs text-foreground outline-none"
-                value={agentFiles[agentFileTab].content}
-                placeholder={
-                  agentFiles[agentFileTab].content.trim().length === 0
-                    ? AGENT_FILE_PLACEHOLDERS[agentFileTab]
-                    : undefined
-                }
-                disabled={agentFilesLoading || agentFilesSaving}
-                onChange={(event) => {
-                  setAgentFileContent(event.target.value);
-                }}
-              />
-            )}
+
+              <div className="rounded-md border border-border/80 bg-surface-3 p-3">
+                <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  User (USER.md)
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span>User name</span>
+                    <input
+                      className="h-9 rounded-md border border-border/80 bg-surface-2 px-2 text-xs text-foreground outline-none"
+                      value={draft.user.name}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setUserField("name", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span>What to call them</span>
+                    <input
+                      aria-label="What to call them"
+                      className="h-9 rounded-md border border-border/80 bg-surface-2 px-2 text-xs text-foreground outline-none"
+                      value={draft.user.callThem}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setUserField("callThem", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span>Pronouns</span>
+                    <input
+                      className="h-9 rounded-md border border-border/80 bg-surface-2 px-2 text-xs text-foreground outline-none"
+                      value={draft.user.pronouns}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setUserField("pronouns", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span>Timezone</span>
+                    <input
+                      className="h-9 rounded-md border border-border/80 bg-surface-2 px-2 text-xs text-foreground outline-none"
+                      value={draft.user.timezone}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setUserField("timezone", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground sm:col-span-2">
+                    <span>Notes</span>
+                    <input
+                      className="h-9 rounded-md border border-border/80 bg-surface-2 px-2 text-xs text-foreground outline-none"
+                      value={draft.user.notes}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setUserField("notes", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground sm:col-span-2">
+                    <span>User context</span>
+                    <textarea
+                      className="min-h-24 resize-y rounded-md border border-border/80 bg-surface-2 px-2 py-2 text-xs text-foreground outline-none"
+                      value={draft.user.context}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setUserField("context", event.target.value)}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-md border border-border/80 bg-surface-3 p-3">
+                <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  Soul (SOUL.md)
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground sm:col-span-2">
+                    <span>Soul core truths</span>
+                    <textarea
+                      className="min-h-24 resize-y rounded-md border border-border/80 bg-surface-2 px-2 py-2 text-xs text-foreground outline-none"
+                      value={draft.soul.coreTruths}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setSoulField("coreTruths", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground sm:col-span-2">
+                    <span>Soul boundaries</span>
+                    <textarea
+                      className="min-h-24 resize-y rounded-md border border-border/80 bg-surface-2 px-2 py-2 text-xs text-foreground outline-none"
+                      value={draft.soul.boundaries}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setSoulField("boundaries", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground sm:col-span-2">
+                    <span>Soul vibe</span>
+                    <textarea
+                      className="min-h-20 resize-y rounded-md border border-border/80 bg-surface-2 px-2 py-2 text-xs text-foreground outline-none"
+                      value={draft.soul.vibe}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setSoulField("vibe", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground sm:col-span-2">
+                    <span>Soul continuity</span>
+                    <textarea
+                      className="min-h-20 resize-y rounded-md border border-border/80 bg-surface-2 px-2 py-2 text-xs text-foreground outline-none"
+                      value={draft.soul.continuity}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setSoulField("continuity", event.target.value)}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-md border border-border/80 bg-surface-3 p-3">
+                <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  Additional files
+                </div>
+                <div className="mt-2 grid gap-2">
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span>Agent instructions (AGENTS.md)</span>
+                    <textarea
+                      className="min-h-24 resize-y rounded-md border border-border/80 bg-surface-2 px-2 py-2 text-xs text-foreground outline-none"
+                      value={draft.agents}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setFileField("agents", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span>Tool conventions (TOOLS.md)</span>
+                    <textarea
+                      className="min-h-20 resize-y rounded-md border border-border/80 bg-surface-2 px-2 py-2 text-xs text-foreground outline-none"
+                      value={draft.tools}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setFileField("tools", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span>Heartbeat notes (HEARTBEAT.md)</span>
+                    <textarea
+                      className="min-h-20 resize-y rounded-md border border-border/80 bg-surface-2 px-2 py-2 text-xs text-foreground outline-none"
+                      value={draft.heartbeat}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setFileField("heartbeat", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span>Memory notes (MEMORY.md)</span>
+                    <textarea
+                      className="min-h-20 resize-y rounded-md border border-border/80 bg-surface-2 px-2 py-2 text-xs text-foreground outline-none"
+                      value={draft.memory}
+                      disabled={inputsDisabled}
+                      onChange={(event) => setFileField("memory", event.target.value)}
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="mt-3 flex items-center justify-between gap-2 pt-2">
-            <div className="text-xs text-muted-foreground">All changes saved</div>
+            <div className="text-xs text-muted-foreground">
+              {agentFilesDirty ? "Unsaved changes" : "All changes saved"}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {agentFilesLoading
+                ? "Loading files…"
+                : agentFilesSaving
+                  ? "Saving files…"
+                  : `Workspace files: ${Object.values(agentFiles).filter((entry) => entry.exists).length}/${AGENT_FILE_NAMES.length}`}
+            </div>
           </div>
         </section>
       </div>

@@ -42,8 +42,18 @@ const createAgent = (agentId: string, name: string, sessionKey: string): AgentSt
 
 const createMockClient = () => {
   const filesByAgent: Record<string, Record<string, string>> = {
-    "agent-1": { "AGENTS.md": "alpha agents" },
-    "agent-2": { "AGENTS.md": "beta agents" },
+    "agent-1": {
+      "AGENTS.md": "alpha agents",
+      "SOUL.md": "# SOUL.md - Who You Are\n\n## Core Truths\n\nBe useful.",
+      "IDENTITY.md": "# IDENTITY.md - Who Am I?\n\n- Name: Alpha\n- Creature: droid\n- Vibe: calm\n- Emoji: 🤖\n",
+      "USER.md": "# USER.md - About Your Human\n\n- Name: George\n- What to call them: GP\n\n## Context\n\nBuilding OpenClaw Studio.",
+      "TOOLS.md": "tool notes",
+      "HEARTBEAT.md": "heartbeat notes",
+      "MEMORY.md": "durable memory",
+    },
+    "agent-2": {
+      "AGENTS.md": "beta agents",
+    },
   };
 
   const calls: Array<{ method: string; params: unknown }> = [];
@@ -85,7 +95,7 @@ describe("AgentBrainPanel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders_selected_agent_file_tabs", async () => {
+  it("renders_guided_personality_fields_instead_of_file_tabs", async () => {
     const { client } = createMockClient();
     const agents = [
       createAgent("agent-1", "Alpha", "session-1"),
@@ -101,11 +111,13 @@ describe("AgentBrainPanel", () => {
       })
     );
 
-    expect(screen.getByRole("button", { name: "AGENTS" })).toBeInTheDocument();
-
     await waitFor(() => {
-      expect(screen.getByText("alpha agents")).toBeInTheDocument();
+      expect(screen.getByLabelText("Identity name")).toBeInTheDocument();
     });
+
+    expect(screen.queryByRole("button", { name: "AGENTS" })).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("Alpha")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("GP")).toBeInTheDocument();
   });
 
   it("shows_actionable_message_when_session_key_missing", async () => {
@@ -140,27 +152,27 @@ describe("AgentBrainPanel", () => {
       })
     );
 
-    await screen.findByText("alpha agents");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    const textarea = await screen.findByDisplayValue("alpha agents");
-    fireEvent.change(textarea, { target: { value: "alpha agents updated" } });
+    const input = await screen.findByLabelText("Identity name");
+    fireEvent.change(input, { target: { value: "Alpha Prime" } });
     fireEvent.click(screen.getByTestId("agent-brain-close"));
 
     await waitFor(() => {
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
+    const identityWrite = calls.find(
+      (entry) =>
+        entry.method === "agents.files.set" &&
+        Boolean(
+          entry.params &&
+            typeof entry.params === "object" &&
+            (entry.params as Record<string, unknown>).name === "IDENTITY.md"
+        )
+    );
+
+    expect(identityWrite).toBeTruthy();
     expect(
-      calls.some(
-        (entry) =>
-          entry.method === "agents.files.set" &&
-          Boolean(
-            entry.params &&
-              typeof entry.params === "object" &&
-              (entry.params as Record<string, unknown>).name === "AGENTS.md" &&
-              (entry.params as Record<string, unknown>).content === "alpha agents updated"
-          )
-      )
-    ).toBeTruthy();
+      String((identityWrite?.params as Record<string, unknown>).content ?? "")
+    ).toContain("- Name: Alpha Prime");
   });
 });
