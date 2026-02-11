@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createStudioSettingsCoordinator } from "@/lib/studio/coordinator";
 import {
   useGatewayConnection,
@@ -9,12 +9,16 @@ import {
 import type { EventFrame } from "@/lib/gateway/GatewayClient";
 import { createRafBatcher } from "@/lib/dom";
 import { mapEventFrameToEntry } from "@/features/observe/state/observeEventHandler";
-import { observeReducer, initialObserveState } from "@/features/observe/state/reducer";
+import {
+  observeReducer,
+  initialObserveState,
+} from "@/features/observe/state/reducer";
 import type { SessionStatus } from "@/features/observe/state/types";
 import { ObserveHeaderBar } from "@/features/observe/components/ObserveHeaderBar";
 import { SessionOverview } from "@/features/observe/components/SessionOverview";
 import { ActivityFeed } from "@/features/observe/components/ActivityFeed";
 import { InterventionAlerts } from "@/features/observe/components/InterventionAlerts";
+import { LiveOutputPanel } from "@/features/observe/components/LiveOutputPanel";
 
 type SessionsListResult = {
   sessions: Array<{
@@ -26,22 +30,37 @@ type SessionsListResult = {
   }>;
 };
 
-const inferOrigin = (label?: string): SessionStatus["origin"] => {
-  if (!label) return "unknown";
-  const lower = label.toLowerCase();
-  if (lower.includes("cron") || lower.includes("isolated")) return "cron";
-  if (lower.includes("heartbeat")) return "heartbeat";
-  if (lower.includes("interactive") || lower.includes("main")) return "interactive";
+const inferOrigin = (
+  label?: string,
+  key?: string
+): SessionStatus["origin"] => {
+  if (label) {
+    const lower = label.toLowerCase();
+    if (lower.includes("cron") || lower.includes("isolated")) return "cron";
+    if (lower.includes("heartbeat")) return "heartbeat";
+    if (lower.includes("interactive") || lower.includes("main"))
+      return "interactive";
+  }
+  if (key) {
+    const lowerKey = key.toLowerCase();
+    if (lowerKey.includes("cron:") || lowerKey.includes("isolated"))
+      return "cron";
+    if (lowerKey.includes("heartbeat")) return "heartbeat";
+  }
   return "unknown";
 };
 
 export default function ObservePage() {
-  const [settingsCoordinator] = useState(() => createStudioSettingsCoordinator());
+  const [settingsCoordinator] = useState(() =>
+    createStudioSettingsCoordinator()
+  );
   const { client, status } = useGatewayConnection(settingsCoordinator);
   const [state, dispatch] = useReducer(observeReducer, initialObserveState);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
 
-  const pendingEntriesRef = useRef<ReturnType<typeof mapEventFrameToEntry>[]>([]);
+  const pendingEntriesRef = useRef<ReturnType<typeof mapEventFrameToEntry>[]>(
+    []
+  );
 
   // Subscribe to ALL gateway events with RAF batching
   useEffect(() => {
@@ -77,23 +96,31 @@ export default function ObservePage() {
 
     const loadSessions = async () => {
       try {
-        const result = await client.call<SessionsListResult>("sessions.list", {
-          includeGlobal: true,
-          includeUnknown: true,
-          limit: 200,
-        });
+        const result = await client.call<SessionsListResult>(
+          "sessions.list",
+          {
+            includeGlobal: true,
+            includeUnknown: true,
+            limit: 200,
+          }
+        );
         if (cancelled) return;
-        const sessions: SessionStatus[] = (result.sessions ?? []).map((s) => ({
-          sessionKey: s.key,
-          agentId: s.agentId ?? parseAgentIdFromSessionKey(s.key),
-          displayName: s.displayName ?? s.agentId ?? null,
-          origin: inferOrigin(s.origin?.label),
-          status: "idle" as const,
-          lastActivityAt: s.updatedAt ?? null,
-          currentToolName: null,
-          lastError: null,
-          eventCount: 0,
-        }));
+        const sessions: SessionStatus[] = (result.sessions ?? []).map(
+          (s) => ({
+            sessionKey: s.key,
+            agentId: s.agentId ?? parseAgentIdFromSessionKey(s.key),
+            displayName: s.displayName ?? s.agentId ?? null,
+            origin: inferOrigin(s.origin?.label, s.key),
+            status: "idle" as const,
+            lastActivityAt: s.updatedAt ?? null,
+            currentToolName: null,
+            currentToolArgs: null,
+            currentActivity: null,
+            streamingText: null,
+            lastError: null,
+            eventCount: 0,
+          })
+        );
         dispatch({ type: "hydrateSessions", sessions });
       } catch (err) {
         console.warn("[observe] Failed to load sessions:", err);
@@ -117,22 +144,30 @@ export default function ObservePage() {
       refreshTimerRef.current = setTimeout(async () => {
         refreshTimerRef.current = null;
         try {
-          const result = await client.call<SessionsListResult>("sessions.list", {
-            includeGlobal: true,
-            includeUnknown: true,
-            limit: 200,
-          });
-          const sessions: SessionStatus[] = (result.sessions ?? []).map((s) => ({
-            sessionKey: s.key,
-            agentId: s.agentId ?? parseAgentIdFromSessionKey(s.key),
-            displayName: s.displayName ?? s.agentId ?? null,
-            origin: inferOrigin(s.origin?.label),
-            status: "idle" as const,
-            lastActivityAt: s.updatedAt ?? null,
-            currentToolName: null,
-            lastError: null,
-            eventCount: 0,
-          }));
+          const result = await client.call<SessionsListResult>(
+            "sessions.list",
+            {
+              includeGlobal: true,
+              includeUnknown: true,
+              limit: 200,
+            }
+          );
+          const sessions: SessionStatus[] = (result.sessions ?? []).map(
+            (s) => ({
+              sessionKey: s.key,
+              agentId: s.agentId ?? parseAgentIdFromSessionKey(s.key),
+              displayName: s.displayName ?? s.agentId ?? null,
+              origin: inferOrigin(s.origin?.label, s.key),
+              status: "idle" as const,
+              lastActivityAt: s.updatedAt ?? null,
+              currentToolName: null,
+              currentToolArgs: null,
+              currentActivity: null,
+              streamingText: null,
+              lastError: null,
+              eventCount: 0,
+            })
+          );
           dispatch({ type: "hydrateSessions", sessions });
         } catch {
           // ignore refresh failures
@@ -161,12 +196,22 @@ export default function ObservePage() {
     setSelectedSession(sessionKey);
   }, []);
 
+  // Find the primary running session for the live output panel
+  const activeSession = useMemo(() => {
+    if (selectedSession) {
+      return state.sessions.find(
+        (s) => s.sessionKey === selectedSession && s.status === "running"
+      );
+    }
+    return state.sessions.find((s) => s.status === "running");
+  }, [state.sessions, selectedSession]);
+
   return (
     <main className="mx-auto flex h-screen w-full max-w-[1800px] flex-col gap-3 p-3">
       <ObserveHeaderBar
         status={status}
         paused={state.paused}
-        entryCount={state.entries.length}
+        sessions={state.sessions}
         interventionCount={state.interventionCount}
         onTogglePause={handleTogglePause}
         onClear={handleClear}
@@ -176,7 +221,7 @@ export default function ObservePage() {
 
       <div className="flex min-h-0 flex-1 gap-3">
         {/* Session sidebar */}
-        <div className="glass-panel hidden w-[280px] shrink-0 overflow-hidden rounded-xl lg:flex lg:flex-col">
+        <div className="glass-panel hidden w-[300px] shrink-0 overflow-hidden rounded-xl lg:flex lg:flex-col">
           <SessionOverview
             sessions={state.sessions}
             selectedSession={selectedSession}
@@ -184,12 +229,20 @@ export default function ObservePage() {
           />
         </div>
 
-        {/* Activity feed */}
-        <div className="glass-panel flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl">
-          <ActivityFeed
-            entries={state.entries}
-            sessionFilter={selectedSession}
-          />
+        {/* Main content: live output + activity feed */}
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          {/* Live output panel — shows streaming text from active session */}
+          {activeSession && (
+            <LiveOutputPanel session={activeSession} />
+          )}
+
+          {/* Activity feed */}
+          <div className="glass-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl">
+            <ActivityFeed
+              entries={state.entries}
+              sessionFilter={selectedSession}
+            />
+          </div>
         </div>
       </div>
     </main>

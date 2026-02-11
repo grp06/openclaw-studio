@@ -8,9 +8,11 @@ export type ObserveEntry = {
   stream: string | null;
   toolName: string | null;
   toolPhase: string | null;
+  toolArgs: string | null;
   chatState: string | null;
   errorMessage: string | null;
   text: string | null;
+  description: string;
   severity: "info" | "warn" | "error";
 };
 
@@ -24,6 +26,9 @@ export type SessionStatus = {
   status: "idle" | "running" | "error";
   lastActivityAt: number | null;
   currentToolName: string | null;
+  currentToolArgs: string | null;
+  currentActivity: string | null;
+  streamingText: string | null;
   lastError: string | null;
   eventCount: number;
 };

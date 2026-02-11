@@ -1,4 +1,9 @@
-import type { ObserveAction, ObserveEntry, ObserveState, SessionStatus } from "./types";
+import type {
+  ObserveAction,
+  ObserveEntry,
+  ObserveState,
+  SessionStatus,
+} from "./types";
 import { MAX_ENTRIES } from "./types";
 
 export const initialObserveState: ObserveState = {
@@ -25,10 +30,13 @@ const updateSessionsFromEntries = (
         sessionKey: entry.sessionKey,
         agentId: entry.agentId,
         displayName: entry.agentId,
-        origin: "unknown",
+        origin: inferOriginFromKey(entry.sessionKey),
         status: "idle",
         lastActivityAt: null,
         currentToolName: null,
+        currentToolArgs: null,
+        currentActivity: null,
+        streamingText: null,
         lastError: null,
         eventCount: 0,
       };
@@ -42,19 +50,44 @@ const updateSessionsFromEntries = (
       if (entry.text === "start") {
         session.status = "running";
         session.currentToolName = null;
+        session.currentToolArgs = null;
+        session.currentActivity = "Starting...";
+        session.streamingText = null;
         session.lastError = null;
       } else if (entry.text === "end") {
         session.status = "idle";
         session.currentToolName = null;
+        session.currentToolArgs = null;
+        session.currentActivity = null;
+        session.streamingText = null;
       } else if (entry.text === "error") {
         session.status = "error";
         session.lastError = entry.errorMessage;
         session.currentToolName = null;
+        session.currentToolArgs = null;
+        session.currentActivity = entry.description;
       }
-    }
-
-    if (entry.stream === "tool" && entry.toolName) {
-      session.currentToolName = entry.toolName;
+    } else if (entry.stream === "tool") {
+      if (entry.toolPhase !== "result") {
+        session.currentToolName = entry.toolName;
+        session.currentToolArgs = entry.toolArgs;
+        session.currentActivity = entry.description;
+        session.streamingText = null;
+      } else {
+        session.currentActivity = entry.description;
+        // Keep tool name visible briefly after result
+      }
+    } else if (entry.stream === "assistant") {
+      session.currentToolName = null;
+      session.currentActivity = "Writing response...";
+      if (entry.text) {
+        session.streamingText = entry.text;
+      }
+    } else if (entry.eventType === "chat") {
+      if (entry.chatState === "final") {
+        session.currentActivity = entry.description;
+        session.streamingText = null;
+      }
     }
 
     if (entry.severity === "error" && entry.errorMessage) {
@@ -63,6 +96,13 @@ const updateSessionsFromEntries = (
   }
 
   return Array.from(map.values());
+};
+
+const inferOriginFromKey = (key: string): SessionStatus["origin"] => {
+  const lower = key.toLowerCase();
+  if (lower.includes("cron:") || lower.includes("isolated")) return "cron";
+  if (lower.includes("heartbeat")) return "heartbeat";
+  return "interactive";
 };
 
 const countInterventions = (entries: ObserveEntry[]): number => {
@@ -85,7 +125,10 @@ export const observeReducer = (
         merged.length > MAX_ENTRIES
           ? merged.slice(merged.length - MAX_ENTRIES)
           : merged;
-      const sessions = updateSessionsFromEntries(state.sessions, action.entries);
+      const sessions = updateSessionsFromEntries(
+        state.sessions,
+        action.entries
+      );
       return {
         ...state,
         entries: capped,
@@ -105,7 +148,10 @@ export const observeReducer = (
           merged.push({
             ...current,
             displayName: incoming.displayName ?? current.displayName,
-            origin: incoming.origin !== "unknown" ? incoming.origin : current.origin,
+            origin:
+              incoming.origin !== "unknown"
+                ? incoming.origin
+                : current.origin,
           });
           existing.delete(incoming.sessionKey);
         } else {
