@@ -292,7 +292,6 @@ const applyGatewayConfigPatch = async (params: {
     raw: JSON.stringify(params.patch, null, 2),
   };
   if (baseHash) payload.baseHash = baseHash;
-  if (params.sessionKey) payload.sessionKey = params.sessionKey;
   try {
     await params.client.call("config.patch", payload);
   } catch (err) {

@@ -215,6 +215,11 @@ export const buildHistoryLines = (messages: ChatHistoryMessage[]): HistoryLinesR
   let lastAssistantAt: number | null = null;
   let lastRole: string | null = null;
   let lastUser: string | null = null;
+  const isRestartSentinelMessage = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    return /^(?:System:\s*\[[^\]]+\]\s*)?GatewayRestart:\s*\{/.test(trimmed);
+  };
   for (const message of messages) {
     const role = typeof message.role === "string" ? message.role : "other";
     const extracted = extractText(message);
@@ -231,6 +236,7 @@ export const buildHistoryLines = (messages: ChatHistoryMessage[]): HistoryLinesR
     }
     if (role === "user") {
       if (text && isHeartbeatPrompt(text)) continue;
+      if (text && isRestartSentinelMessage(text)) continue;
       if (text) {
         const at = extractMessageTimestamp(message);
         if (typeof at === "number") {
