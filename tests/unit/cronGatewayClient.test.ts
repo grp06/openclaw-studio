@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createCronJob,
   listCronJobs,
   removeCronJob,
   removeCronJobsForAgent,
@@ -99,5 +100,43 @@ describe("cron gateway client", () => {
     await expect(removeCronJobsForAgent(client, "agent-1")).rejects.toThrow(
       'Failed to delete cron job "Job 1" (job-1).'
     );
+  });
+
+  it("creates_job_via_cron_add", async () => {
+    const client = {
+      call: vi.fn(async () => ({ id: "job-1", name: "Morning brief" })),
+    } as unknown as GatewayClient;
+
+    const input = {
+      name: "Morning brief",
+      agentId: "agent-1",
+      enabled: true,
+      schedule: { kind: "cron" as const, expr: "0 7 * * *", tz: "America/Chicago" },
+      sessionTarget: "isolated" as const,
+      wakeMode: "now" as const,
+      payload: { kind: "agentTurn" as const, message: "Summarize overnight updates." },
+      delivery: { mode: "announce" as const, channel: "last" },
+    };
+
+    await createCronJob(client, input);
+
+    expect(client.call).toHaveBeenCalledWith("cron.add", input);
+  });
+
+  it("throws_when_create_payload_missing_required_name", async () => {
+    const client = {
+      call: vi.fn(async () => ({ id: "job-1" })),
+    } as unknown as GatewayClient;
+
+    await expect(
+      createCronJob(client, {
+        name: "   ",
+        agentId: "agent-1",
+        schedule: { kind: "every", everyMs: 60_000 },
+        sessionTarget: "isolated",
+        wakeMode: "now",
+        payload: { kind: "agentTurn", message: "Run checks." },
+      })
+    ).rejects.toThrow("Cron job name is required.");
   });
 });

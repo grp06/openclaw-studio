@@ -47,7 +47,9 @@ import {
   removeCronJob,
   resolveLatestCronJobForAgent,
   runCronJobNow,
+  sortCronJobsByUpdatedAt,
 } from "@/lib/cron/types";
+import type { CronCreateDraft } from "@/lib/cron/createPayloadBuilder";
 import {
   createGatewayAgent,
   renameGatewayAgent,
@@ -68,6 +70,7 @@ import {
 import { fetchJson } from "@/lib/http";
 import { bootstrapAgentBrainFilesFromTemplate } from "@/lib/gateway/agentFiles";
 import { deleteAgentViaStudio } from "@/features/agents/operations/deleteAgentOperation";
+import { performCronCreateFlow } from "@/features/agents/operations/cronCreateOperation";
 import { sendChatMessageViaStudio } from "@/features/agents/operations/chatSendOperation";
 import { hydrateAgentFleetFromGateway } from "@/features/agents/operations/agentFleetHydration";
 import { useConfigMutationQueue } from "@/features/agents/operations/useConfigMutationQueue";
@@ -141,9 +144,6 @@ const resolveSpecialUpdateKind = (message: string) => {
   return cronIndex > heartbeatIndex ? "cron" : "heartbeat";
 };
 
-const sortCronJobsByUpdatedAt = (jobs: CronJobSummary[]) =>
-  [...jobs].sort((a, b) => b.updatedAtMs - a.updatedAtMs);
-
 const findLatestHeartbeatResponse = (messages: ChatHistoryMessage[]) => {
   let awaitingHeartbeatReply = false;
   let latestResponse: string | null = null;
@@ -213,6 +213,7 @@ const AgentStudioPage = () => {
   const [settingsCronJobs, setSettingsCronJobs] = useState<CronJobSummary[]>([]);
   const [settingsCronLoading, setSettingsCronLoading] = useState(false);
   const [settingsCronError, setSettingsCronError] = useState<string | null>(null);
+  const [cronCreateBusy, setCronCreateBusy] = useState(false);
   const [cronRunBusyJobId, setCronRunBusyJobId] = useState<string | null>(null);
   const [cronDeleteBusyJobId, setCronDeleteBusyJobId] = useState<string | null>(null);
   const [settingsHeartbeats, setSettingsHeartbeats] = useState<AgentHeartbeatSummary[]>([]);
@@ -1093,12 +1094,39 @@ const AgentStudioPage = () => {
     },
   });
 
+  const handleCreateCronJob = useCallback(
+    async (agentId: string, draft: CronCreateDraft) => {
+      try {
+        await performCronCreateFlow({
+          client,
+          agentId,
+          draft,
+          busy: {
+            createBusy: cronCreateBusy,
+            runBusyJobId: cronRunBusyJobId,
+            deleteBusyJobId: cronDeleteBusyJobId,
+          },
+          onBusyChange: setCronCreateBusy,
+          onError: setSettingsCronError,
+          onJobs: setSettingsCronJobs,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to create cron job.";
+        if (!isGatewayDisconnectLikeError(err)) {
+          console.error(message);
+        }
+        throw err;
+      }
+    },
+    [client, cronCreateBusy, cronDeleteBusyJobId, cronRunBusyJobId]
+  );
+
   const handleRunCronJob = useCallback(
     async (agentId: string, jobId: string) => {
       const resolvedJobId = jobId.trim();
       const resolvedAgentId = agentId.trim();
       if (!resolvedJobId || !resolvedAgentId) return;
-      if (cronRunBusyJobId || cronDeleteBusyJobId) return;
+      if (cronCreateBusy || cronRunBusyJobId || cronDeleteBusyJobId) return;
       setCronRunBusyJobId(resolvedJobId);
       setSettingsCronError(null);
       try {
@@ -1112,7 +1140,7 @@ const AgentStudioPage = () => {
         setCronRunBusyJobId((current) => (current === resolvedJobId ? null : current));
       }
     },
-    [client, cronDeleteBusyJobId, cronRunBusyJobId, loadCronJobsForSettingsAgent]
+    [client, cronCreateBusy, cronDeleteBusyJobId, cronRunBusyJobId, loadCronJobsForSettingsAgent]
   );
 
   const handleDeleteCronJob = useCallback(
@@ -1120,7 +1148,7 @@ const AgentStudioPage = () => {
       const resolvedJobId = jobId.trim();
       const resolvedAgentId = agentId.trim();
       if (!resolvedJobId || !resolvedAgentId) return;
-      if (cronRunBusyJobId || cronDeleteBusyJobId) return;
+      if (cronCreateBusy || cronRunBusyJobId || cronDeleteBusyJobId) return;
       setCronDeleteBusyJobId(resolvedJobId);
       setSettingsCronError(null);
       try {
@@ -1137,7 +1165,7 @@ const AgentStudioPage = () => {
         setCronDeleteBusyJobId((current) => (current === resolvedJobId ? null : current));
       }
     },
-    [client, cronDeleteBusyJobId, cronRunBusyJobId, loadCronJobsForSettingsAgent]
+    [client, cronCreateBusy, cronDeleteBusyJobId, cronRunBusyJobId, loadCronJobsForSettingsAgent]
   );
 
   const handleRunHeartbeat = useCallback(
@@ -1990,8 +2018,10 @@ const AgentStudioPage = () => {
                 cronJobs={settingsCronJobs}
                 cronLoading={settingsCronLoading}
                 cronError={settingsCronError}
+                cronCreateBusy={cronCreateBusy}
                 cronRunBusyJobId={cronRunBusyJobId}
                 cronDeleteBusyJobId={cronDeleteBusyJobId}
+                onCreateCronJob={(draft) => handleCreateCronJob(settingsAgent.agentId, draft)}
                 onRunCronJob={(jobId) => handleRunCronJob(settingsAgent.agentId, jobId)}
                 onDeleteCronJob={(jobId) => handleDeleteCronJob(settingsAgent.agentId, jobId)}
                 heartbeats={settingsHeartbeats}

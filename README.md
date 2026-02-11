@@ -105,6 +105,14 @@ Paths and key settings:
 - Studio settings: `~/.openclaw/openclaw-studio/settings.json`
 - Default gateway URL: `ws://127.0.0.1:18789` (override via Studio Settings or `NEXT_PUBLIC_GATEWAY_URL`)
 
+## Cron jobs in Agent Settings
+
+- Open an agent and go to **Settings -> Cron jobs**.
+- If no jobs exist, use the empty-state **Create** button.
+- If jobs already exist, use the header **Create** button.
+- The modal is agent-scoped and walks through template selection, task text, schedule, and review.
+- Submitting creates the job via gateway `cron.add` and refreshes that same agent's cron list.
+
 ## Troubleshooting
 
 - **Missing config**: Run `openclaw onboard` or set `OPENCLAW_CONFIG_PATH`

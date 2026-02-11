@@ -323,6 +323,170 @@ describe("AgentSettingsPanel", () => {
     expect(screen.getByText("No cron jobs for this agent.")).toBeInTheDocument();
   });
 
+  it("shows_create_button_when_no_cron_jobs", () => {
+    render(
+      createElement(AgentSettingsPanel, {
+        agent: createAgent(),
+        onClose: vi.fn(),
+        onRename: vi.fn(async () => true),
+        onNewSession: vi.fn(),
+        onDelete: vi.fn(),
+        onToolCallingToggle: vi.fn(),
+        onThinkingTracesToggle: vi.fn(),
+        cronJobs: [],
+        cronLoading: false,
+        cronError: null,
+        cronRunBusyJobId: null,
+        cronDeleteBusyJobId: null,
+        onRunCronJob: vi.fn(),
+        onDeleteCronJob: vi.fn(),
+      })
+    );
+
+    expect(screen.getByRole("button", { name: "Create" })).toBeInTheDocument();
+  });
+
+  it("opens_cron_create_modal_from_empty_state_button", () => {
+    render(
+      createElement(AgentSettingsPanel, {
+        agent: createAgent(),
+        onClose: vi.fn(),
+        onRename: vi.fn(async () => true),
+        onNewSession: vi.fn(),
+        onDelete: vi.fn(),
+        onToolCallingToggle: vi.fn(),
+        onThinkingTracesToggle: vi.fn(),
+        cronJobs: [],
+        cronLoading: false,
+        cronError: null,
+        cronRunBusyJobId: null,
+        cronDeleteBusyJobId: null,
+        onRunCronJob: vi.fn(),
+        onDeleteCronJob: vi.fn(),
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(screen.getByRole("dialog", { name: "Create cron job" })).toBeInTheDocument();
+  });
+
+  it("submits_modal_with_agent_scoped_draft", async () => {
+    const onCreateCronJob = vi.fn(async () => {});
+    render(
+      createElement(AgentSettingsPanel, {
+        agent: createAgent(),
+        onClose: vi.fn(),
+        onRename: vi.fn(async () => true),
+        onNewSession: vi.fn(),
+        onDelete: vi.fn(),
+        onToolCallingToggle: vi.fn(),
+        onThinkingTracesToggle: vi.fn(),
+        cronJobs: [],
+        cronLoading: false,
+        cronError: null,
+        cronRunBusyJobId: null,
+        cronDeleteBusyJobId: null,
+        onRunCronJob: vi.fn(),
+        onDeleteCronJob: vi.fn(),
+        onCreateCronJob,
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.change(screen.getByLabelText("Job name"), {
+      target: { value: "Nightly sync" },
+    });
+    fireEvent.change(screen.getByLabelText("Task"), {
+      target: { value: "Sync project status and report blockers." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create cron job" }));
+
+    await waitFor(() => {
+      expect(onCreateCronJob).toHaveBeenCalledWith({
+        templateId: "custom",
+        name: "Nightly sync",
+        taskText: "Sync project status and report blockers.",
+        scheduleKind: "every",
+        everyAmount: 30,
+        everyUnit: "minutes",
+        deliveryMode: "announce",
+        deliveryChannel: "last",
+      });
+    });
+  });
+
+  it("disables_create_submit_while_create_in_flight", () => {
+    render(
+      createElement(AgentSettingsPanel, {
+        agent: createAgent(),
+        onClose: vi.fn(),
+        onRename: vi.fn(async () => true),
+        onNewSession: vi.fn(),
+        onDelete: vi.fn(),
+        onToolCallingToggle: vi.fn(),
+        onThinkingTracesToggle: vi.fn(),
+        cronJobs: [],
+        cronLoading: false,
+        cronError: null,
+        cronRunBusyJobId: null,
+        cronDeleteBusyJobId: null,
+        onRunCronJob: vi.fn(),
+        onDeleteCronJob: vi.fn(),
+        cronCreateBusy: true,
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(screen.getByRole("button", { name: "Create cron job" })).toBeDisabled();
+  });
+
+  it("keeps_modal_open_and_shows_error_when_create_fails", async () => {
+    const onCreateCronJob = vi.fn(async () => {
+      throw new Error("Gateway exploded");
+    });
+    render(
+      createElement(AgentSettingsPanel, {
+        agent: createAgent(),
+        onClose: vi.fn(),
+        onRename: vi.fn(async () => true),
+        onNewSession: vi.fn(),
+        onDelete: vi.fn(),
+        onToolCallingToggle: vi.fn(),
+        onThinkingTracesToggle: vi.fn(),
+        cronJobs: [],
+        cronLoading: false,
+        cronError: null,
+        cronRunBusyJobId: null,
+        cronDeleteBusyJobId: null,
+        onRunCronJob: vi.fn(),
+        onDeleteCronJob: vi.fn(),
+        onCreateCronJob,
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.change(screen.getByLabelText("Job name"), {
+      target: { value: "Nightly sync" },
+    });
+    fireEvent.change(screen.getByLabelText("Task"), {
+      target: { value: "Sync project status and report blockers." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create cron job" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Gateway exploded")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("dialog", { name: "Create cron job" })).toBeInTheDocument();
+  });
+
   it("renders_heartbeat_section_below_cron", () => {
     render(
       createElement(AgentSettingsPanel, {

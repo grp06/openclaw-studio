@@ -58,6 +58,22 @@ export type CronJobsResult = {
   jobs: CronJobSummary[];
 };
 
+export const sortCronJobsByUpdatedAt = (jobs: CronJobSummary[]) =>
+  [...jobs].sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+
+export type CronJobCreateInput = {
+  name: string;
+  agentId: string;
+  description?: string;
+  enabled?: boolean;
+  deleteAfterRun?: boolean;
+  schedule: CronSchedule;
+  sessionTarget: CronSessionTarget;
+  wakeMode: CronWakeMode;
+  payload: CronPayload;
+  delivery?: CronDelivery;
+};
+
 export const filterCronJobsForAgent = (jobs: CronJobSummary[], agentId: string): CronJobSummary[] => {
   const trimmedAgentId = agentId.trim();
   if (!trimmedAgentId) return [];
@@ -137,6 +153,14 @@ const resolveAgentId = (agentId: string): string => {
   return trimmed;
 };
 
+const resolveCronJobName = (name: string): string => {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    throw new Error("Cron job name is required.");
+  }
+  return trimmed;
+};
+
 export const listCronJobs = async (
   client: GatewayClient,
   params: CronListParams = {}
@@ -162,6 +186,19 @@ export const removeCronJob = async (
   const id = resolveJobId(jobId);
   return client.call<CronRemoveResult>("cron.remove", {
     id,
+  });
+};
+
+export const createCronJob = async (
+  client: GatewayClient,
+  input: CronJobCreateInput
+): Promise<CronJobSummary> => {
+  const name = resolveCronJobName(input.name);
+  const agentId = resolveAgentId(input.agentId);
+  return client.call<CronJobSummary>("cron.add", {
+    ...input,
+    name,
+    agentId,
   });
 };
 

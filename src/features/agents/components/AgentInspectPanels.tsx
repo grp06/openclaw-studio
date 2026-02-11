@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Play, Trash2 } from "lucide-react";
+import { Bell, CalendarDays, ListChecks, Play, Sun, Trash2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import type { AgentState } from "@/features/agents/state/store";
+import type { CronCreateDraft, CronCreateTemplateId } from "@/lib/cron/createPayloadBuilder";
 import { formatCronPayload, formatCronSchedule, type CronJobSummary } from "@/lib/cron/types";
 import type { GatewayClient } from "@/lib/gateway/GatewayClient";
 import type { AgentHeartbeatSummary } from "@/lib/gateway/agentConfig";
@@ -69,6 +70,8 @@ type AgentSettingsPanelProps = {
   cronDeleteBusyJobId: string | null;
   onRunCronJob: (jobId: string) => Promise<void> | void;
   onDeleteCronJob: (jobId: string) => Promise<void> | void;
+  cronCreateBusy?: boolean;
+  onCreateCronJob?: (draft: CronCreateDraft) => Promise<void> | void;
   heartbeats?: AgentHeartbeatSummary[];
   heartbeatLoading?: boolean;
   heartbeatError?: string | null;
@@ -112,6 +115,123 @@ const getFirstLinePreview = (value: string, maxChars: number): string => {
   return `${firstLine.slice(0, maxChars)}...`;
 };
 
+type CronTemplateOption = {
+  id: CronCreateTemplateId;
+  title: string;
+  description: string;
+  icon: typeof Sun;
+  accent: string;
+};
+
+const CRON_TEMPLATE_OPTIONS: CronTemplateOption[] = [
+  {
+    id: "morning-brief",
+    title: "Morning Brief",
+    description: "Daily status summary with overnight updates.",
+    icon: Sun,
+    accent: "border-amber-400/40 bg-amber-500/10",
+  },
+  {
+    id: "reminder",
+    title: "Reminder",
+    description: "A timed nudge for a specific event or task.",
+    icon: Bell,
+    accent: "border-cyan-400/40 bg-cyan-500/10",
+  },
+  {
+    id: "weekly-review",
+    title: "Weekly Review",
+    description: "Recurring synthesis across a longer time window.",
+    icon: CalendarDays,
+    accent: "border-emerald-400/40 bg-emerald-500/10",
+  },
+  {
+    id: "inbox-triage",
+    title: "Inbox Triage",
+    description: "Regular sorting and summarizing of incoming updates.",
+    icon: ListChecks,
+    accent: "border-orange-400/40 bg-orange-500/10",
+  },
+  {
+    id: "custom",
+    title: "Custom",
+    description: "Start from a blank flow and choose each setting.",
+    icon: ListChecks,
+    accent: "border-violet-400/40 bg-violet-500/10",
+  },
+];
+
+const createInitialCronDraft = (): CronCreateDraft => ({
+  templateId: "morning-brief",
+  name: "",
+  taskText: "",
+  scheduleKind: "every",
+  everyAmount: 30,
+  everyUnit: "minutes",
+  deliveryMode: "announce",
+  deliveryChannel: "last",
+});
+
+const applyTemplateDefaults = (templateId: CronCreateTemplateId, current: CronCreateDraft): CronCreateDraft => {
+  if (templateId === "morning-brief") {
+    return {
+      ...current,
+      templateId,
+      name: current.name || "Morning brief",
+      taskText: current.taskText || "Summarize overnight updates and priorities.",
+      scheduleKind: "cron",
+      cronExpr: current.cronExpr || "0 7 * * *",
+      cronTz: current.cronTz || "America/Chicago",
+      deliveryMode: "announce",
+      deliveryChannel: current.deliveryChannel || "last",
+    };
+  }
+  if (templateId === "reminder") {
+    return {
+      ...current,
+      templateId,
+      name: current.name || "Reminder",
+      taskText: current.taskText || "Reminder: follow up on today’s priority task.",
+      scheduleKind: "at",
+    };
+  }
+  if (templateId === "weekly-review") {
+    return {
+      ...current,
+      templateId,
+      name: current.name || "Weekly review",
+      taskText: current.taskText || "Summarize wins, blockers, and next-week priorities.",
+      scheduleKind: "cron",
+      cronExpr: current.cronExpr || "0 9 * * 1",
+      cronTz: current.cronTz || "America/Chicago",
+      deliveryMode: "announce",
+      deliveryChannel: current.deliveryChannel || "last",
+    };
+  }
+  if (templateId === "inbox-triage") {
+    return {
+      ...current,
+      templateId,
+      name: current.name || "Inbox triage",
+      taskText: current.taskText || "Triage unread updates and surface the top actions.",
+      scheduleKind: "every",
+      everyAmount: current.everyAmount ?? 30,
+      everyUnit: current.everyUnit ?? "minutes",
+      deliveryMode: "announce",
+      deliveryChannel: current.deliveryChannel || "last",
+    };
+  }
+  return {
+    ...current,
+    templateId: "custom",
+    scheduleKind: current.scheduleKind ?? "every",
+    everyAmount: current.everyAmount ?? 30,
+    everyUnit: current.everyUnit ?? "minutes",
+    deliveryMode: current.deliveryMode ?? "announce",
+    deliveryChannel: current.deliveryChannel || "last",
+  };
+};
+
 export const AgentSettingsPanel = ({
   agent,
   onClose,
@@ -128,6 +248,8 @@ export const AgentSettingsPanel = ({
   cronDeleteBusyJobId,
   onRunCronJob,
   onDeleteCronJob,
+  cronCreateBusy = false,
+  onCreateCronJob = () => {},
   heartbeats = [],
   heartbeatLoading = false,
   heartbeatError = null,
@@ -141,6 +263,10 @@ export const AgentSettingsPanel = ({
   const [renameError, setRenameError] = useState<string | null>(null);
   const [sessionBusy, setSessionBusy] = useState(false);
   const [expandedCronJobIds, setExpandedCronJobIds] = useState<Set<string>>(() => new Set());
+  const [cronCreateOpen, setCronCreateOpen] = useState(false);
+  const [cronCreateStep, setCronCreateStep] = useState(0);
+  const [cronCreateError, setCronCreateError] = useState<string | null>(null);
+  const [cronDraft, setCronDraft] = useState<CronCreateDraft>(createInitialCronDraft);
 
   useEffect(() => {
     setNameDraft(agent.name);
@@ -177,6 +303,86 @@ export const AgentSettingsPanel = ({
       await onNewSession();
     } finally {
       setSessionBusy(false);
+    }
+  };
+
+  const openCronCreate = () => {
+    setCronCreateOpen(true);
+    setCronCreateStep(0);
+    setCronCreateError(null);
+    setCronDraft(createInitialCronDraft());
+  };
+
+  const closeCronCreate = () => {
+    setCronCreateOpen(false);
+    setCronCreateStep(0);
+    setCronCreateError(null);
+    setCronDraft(createInitialCronDraft());
+  };
+
+  const updateCronDraft = (patch: Partial<CronCreateDraft>) => {
+    setCronDraft((prev) => ({ ...prev, ...patch }));
+  };
+
+  const selectCronTemplate = (templateId: CronCreateTemplateId) => {
+    setCronDraft((prev) => applyTemplateDefaults(templateId, prev));
+  };
+
+  const canMoveToScheduleStep = cronDraft.name.trim().length > 0 && cronDraft.taskText.trim().length > 0;
+  const canMoveToReviewStep =
+    cronDraft.scheduleKind === "every"
+      ? Number.isFinite(cronDraft.everyAmount) && (cronDraft.everyAmount ?? 0) > 0
+      : cronDraft.scheduleKind === "at"
+        ? (cronDraft.scheduleAt ?? "").trim().length > 0
+        : (cronDraft.cronExpr ?? "").trim().length > 0;
+  const canSubmitCronCreate = canMoveToScheduleStep && canMoveToReviewStep;
+
+  const submitCronCreate = async () => {
+    if (cronCreateBusy || !canSubmitCronCreate) {
+      return;
+    }
+    setCronCreateError(null);
+    const payload: CronCreateDraft = {
+      templateId: cronDraft.templateId,
+      name: cronDraft.name.trim(),
+      taskText: cronDraft.taskText.trim(),
+      scheduleKind: cronDraft.scheduleKind,
+      ...(typeof cronDraft.everyAmount === "number" ? { everyAmount: cronDraft.everyAmount } : {}),
+      ...(cronDraft.everyUnit ? { everyUnit: cronDraft.everyUnit } : {}),
+      ...(cronDraft.scheduleAt ? { scheduleAt: cronDraft.scheduleAt } : {}),
+      ...(cronDraft.cronExpr ? { cronExpr: cronDraft.cronExpr } : {}),
+      ...(cronDraft.cronTz ? { cronTz: cronDraft.cronTz } : {}),
+      ...(cronDraft.deliveryMode ? { deliveryMode: cronDraft.deliveryMode } : {}),
+      ...(cronDraft.deliveryChannel ? { deliveryChannel: cronDraft.deliveryChannel } : {}),
+      ...(cronDraft.deliveryTo ? { deliveryTo: cronDraft.deliveryTo } : {}),
+      ...(cronDraft.advancedSessionTarget
+        ? { advancedSessionTarget: cronDraft.advancedSessionTarget }
+        : {}),
+      ...(cronDraft.advancedWakeMode ? { advancedWakeMode: cronDraft.advancedWakeMode } : {}),
+    };
+    try {
+      await onCreateCronJob(payload);
+      closeCronCreate();
+    } catch (err) {
+      setCronCreateError(err instanceof Error ? err.message : "Failed to create cron job.");
+    }
+  };
+
+  const moveCronCreateBack = () => {
+    setCronCreateStep((prev) => Math.max(0, prev - 1));
+  };
+
+  const moveCronCreateNext = () => {
+    if (cronCreateStep === 0) {
+      setCronCreateStep(1);
+      return;
+    }
+    if (cronCreateStep === 1 && canMoveToScheduleStep) {
+      setCronCreateStep(2);
+      return;
+    }
+    if (cronCreateStep === 2 && canMoveToReviewStep) {
+      setCronCreateStep(3);
     }
   };
 
@@ -287,8 +493,19 @@ export const AgentSettingsPanel = ({
           className="rounded-md border border-border/80 bg-card/70 p-4"
           data-testid="agent-settings-cron"
         >
-          <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Cron jobs
+          <div className="flex items-center justify-between gap-2">
+            <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Cron jobs
+            </div>
+            {!cronLoading && !cronError && cronJobs.length > 0 ? (
+              <button
+                className="rounded-md border border-border/80 bg-card/75 px-2.5 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground transition hover:border-border hover:bg-muted/70 disabled:cursor-not-allowed disabled:opacity-60"
+                type="button"
+                onClick={openCronCreate}
+              >
+                Create
+              </button>
+            ) : null}
           </div>
           {cronLoading ? (
             <div className="mt-3 text-[11px] text-muted-foreground">Loading cron jobs...</div>
@@ -299,9 +516,18 @@ export const AgentSettingsPanel = ({
             </div>
           ) : null}
           {!cronLoading && !cronError && cronJobs.length === 0 ? (
-            <div className="mt-3 text-[11px] text-muted-foreground">
-              No cron jobs for this agent.
-            </div>
+            <>
+              <div className="mt-3 text-[11px] text-muted-foreground">
+                No cron jobs for this agent.
+              </div>
+              <button
+                className="mt-3 w-full rounded-md border border-border/80 bg-card/75 px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground transition hover:border-border hover:bg-muted/70 disabled:cursor-not-allowed disabled:opacity-60"
+                type="button"
+                onClick={openCronCreate}
+              >
+                Create
+              </button>
+            </>
           ) : null}
           {!cronLoading && !cronError && cronJobs.length > 0 ? (
             <div className="mt-3 flex flex-col gap-2">
@@ -510,6 +736,259 @@ export const AgentSettingsPanel = ({
           </section>
         )}
       </div>
+      {cronCreateOpen ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Create cron job"
+          onClick={closeCronCreate}
+        >
+          <div
+            className="w-full max-w-2xl rounded-xl border border-border bg-card/95 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-border/80 px-4 py-3">
+              <div className="min-w-0">
+                <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Cron job composer
+                </div>
+                <div className="mt-1 text-base font-semibold text-foreground">Create cron job</div>
+              </div>
+              <button
+                type="button"
+                className="inline-flex h-9 items-center justify-center rounded-md border border-border/80 bg-card/70 px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground transition hover:border-border hover:bg-muted/65"
+                onClick={closeCronCreate}
+              >
+                Close
+              </button>
+            </div>
+            <div className="space-y-4 px-4 py-4">
+              {cronCreateError ? (
+                <div className="rounded-md border border-destructive bg-destructive px-3 py-2 text-xs text-destructive-foreground">
+                  {cronCreateError}
+                </div>
+              ) : null}
+              {cronCreateStep === 0 ? (
+                <div className="space-y-3">
+                  <div className="text-sm text-muted-foreground">
+                    Choose a starter template to prefill your cron job.
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {CRON_TEMPLATE_OPTIONS.map((option) => {
+                      const active = option.id === cronDraft.templateId;
+                      const Icon = option.icon;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          aria-label={option.title}
+                          className={`rounded-md border px-3 py-3 text-left transition ${
+                            active
+                              ? `${option.accent} border-border`
+                              : "border-border/80 bg-card/75 hover:border-border hover:bg-muted/60"
+                          }`}
+                          onClick={() => selectCronTemplate(option.id)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Icon className="h-4 w-4 text-foreground" />
+                            <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground">
+                              {option.title}
+                            </div>
+                          </div>
+                          <div className="mt-1 text-[11px] text-muted-foreground">{option.description}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+              {cronCreateStep === 1 ? (
+                <div className="space-y-3">
+                  <div className="text-sm text-muted-foreground">
+                    Define what this cron job should do.
+                  </div>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]">
+                      Job name
+                    </span>
+                    <input
+                      aria-label="Job name"
+                      className="h-10 rounded-md border border-border bg-card/75 px-3 text-sm text-foreground outline-none"
+                      value={cronDraft.name}
+                      onChange={(event) => updateCronDraft({ name: event.target.value })}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]">
+                      Task
+                    </span>
+                    <textarea
+                      aria-label="Task"
+                      className="min-h-28 rounded-md border border-border bg-card/75 px-3 py-2 text-sm text-foreground outline-none"
+                      value={cronDraft.taskText}
+                      onChange={(event) => updateCronDraft({ taskText: event.target.value })}
+                    />
+                  </label>
+                </div>
+              ) : null}
+              {cronCreateStep === 2 ? (
+                <div className="space-y-3">
+                  <div className="text-sm text-muted-foreground">Choose when this should run.</div>
+                  <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                    <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]">
+                      Schedule type
+                    </span>
+                    <select
+                      className="h-10 rounded-md border border-border bg-card/75 px-3 text-sm text-foreground outline-none"
+                      value={cronDraft.scheduleKind}
+                      onChange={(event) =>
+                        updateCronDraft({ scheduleKind: event.target.value as CronCreateDraft["scheduleKind"] })
+                      }
+                    >
+                      <option value="every">Every</option>
+                      <option value="at">One time</option>
+                      <option value="cron">Advanced cron</option>
+                    </select>
+                  </label>
+                  {cronDraft.scheduleKind === "every" ? (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                        <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]">
+                          Every
+                        </span>
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          className="h-10 rounded-md border border-border bg-card/75 px-3 text-sm text-foreground outline-none"
+                          value={String(cronDraft.everyAmount ?? 30)}
+                          onChange={(event) =>
+                            updateCronDraft({
+                              everyAmount: Number.parseInt(event.target.value, 10) || 0,
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                        <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]">
+                          Unit
+                        </span>
+                        <select
+                          className="h-10 rounded-md border border-border bg-card/75 px-3 text-sm text-foreground outline-none"
+                          value={cronDraft.everyUnit ?? "minutes"}
+                          onChange={(event) =>
+                            updateCronDraft({
+                              everyUnit: event.target.value as CronCreateDraft["everyUnit"],
+                            })
+                          }
+                        >
+                          <option value="minutes">Minutes</option>
+                          <option value="hours">Hours</option>
+                          <option value="days">Days</option>
+                        </select>
+                      </label>
+                    </div>
+                  ) : null}
+                  {cronDraft.scheduleKind === "at" ? (
+                    <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                      <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]">
+                        Run at
+                      </span>
+                      <input
+                        type="datetime-local"
+                        className="h-10 rounded-md border border-border bg-card/75 px-3 text-sm text-foreground outline-none"
+                        value={cronDraft.scheduleAt ?? ""}
+                        onChange={(event) => updateCronDraft({ scheduleAt: event.target.value })}
+                      />
+                    </label>
+                  ) : null}
+                  {cronDraft.scheduleKind === "cron" ? (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                        <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]">
+                          Expression
+                        </span>
+                        <input
+                          className="h-10 rounded-md border border-border bg-card/75 px-3 text-sm text-foreground outline-none"
+                          value={cronDraft.cronExpr ?? ""}
+                          onChange={(event) => updateCronDraft({ cronExpr: event.target.value })}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+                        <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]">
+                          Timezone
+                        </span>
+                        <input
+                          className="h-10 rounded-md border border-border bg-card/75 px-3 text-sm text-foreground outline-none"
+                          value={cronDraft.cronTz ?? ""}
+                          onChange={(event) => updateCronDraft({ cronTz: event.target.value })}
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {cronCreateStep === 3 ? (
+                <div className="space-y-3 text-sm text-muted-foreground">
+                  <div>Review your cron job configuration before creating it.</div>
+                  <div className="rounded-md border border-border/80 bg-card/75 px-3 py-2">
+                    <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground">
+                      {cronDraft.name || "Untitled cron job"}
+                    </div>
+                    <div className="mt-1 text-[11px]">{cronDraft.taskText || "No task provided."}</div>
+                    <div className="mt-2 text-[11px]">
+                      Schedule:{" "}
+                      {cronDraft.scheduleKind === "every"
+                        ? `Every ${cronDraft.everyAmount ?? 0} ${cronDraft.everyUnit ?? "minutes"}`
+                        : cronDraft.scheduleKind === "at"
+                          ? `At ${cronDraft.scheduleAt ?? ""}`
+                          : `Cron ${cronDraft.cronExpr ?? ""}${cronDraft.cronTz ? ` (${cronDraft.cronTz})` : ""}`}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <div className="flex items-center justify-between gap-2 border-t border-border/80 px-4 py-3">
+              <div className="text-[11px] text-muted-foreground">Step {cronCreateStep + 1} of 4</div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-md border border-border/80 bg-card/75 px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground transition hover:border-border hover:bg-muted/65 disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={moveCronCreateBack}
+                  disabled={cronCreateStep === 0 || cronCreateBusy}
+                >
+                  Back
+                </button>
+                {cronCreateStep < 3 ? (
+                  <button
+                    type="button"
+                    className="rounded-md border border-border/80 bg-card/75 px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground transition hover:border-border hover:bg-muted/65 disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={moveCronCreateNext}
+                    disabled={
+                      cronCreateBusy ||
+                      (cronCreateStep === 1 && !canMoveToScheduleStep) ||
+                      (cronCreateStep === 2 && !canMoveToReviewStep)
+                    }
+                  >
+                    Next
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="rounded-md border border-transparent bg-primary/90 px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-foreground disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
+                  onClick={() => {
+                    void submitCronCreate();
+                  }}
+                  disabled={cronCreateBusy || cronCreateStep !== 3 || !canSubmitCronCreate}
+                >
+                  Create cron job
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };
