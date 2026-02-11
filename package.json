@@ -12,6 +12,7 @@
     "sync:gateway-client": "node scripts/sync-openclaw-gateway-client.ts",
     "migrate:architecture": "node scripts/migrate-architecture.ts",
     "studio:setup": "node scripts/studio-setup.js",
+    "smoke:dev-server": "node scripts/smoke-dev-server.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "e2e": "playwright test"
