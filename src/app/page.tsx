@@ -15,7 +15,7 @@ import {
   isHeartbeatPrompt,
   stripUiMetadata,
 } from "@/lib/text/message-extract";
-import { useGatewayConnection } from "@/lib/gateway/GatewayClient";
+// useGatewayConnection is now provided via GatewayConnectionContext
 import { createRafBatcher } from "@/lib/dom";
 import {
   buildGatewayModelChoices,
@@ -56,7 +56,7 @@ import {
   type AgentHeartbeatSummary,
 } from "@/lib/gateway/agentConfig";
 import { buildAvatarDataUrl } from "@/lib/avatars/multiavatar";
-import { createStudioSettingsCoordinator } from "@/lib/studio/coordinator";
+// createStudioSettingsCoordinator is now managed by GatewayConnectionProvider
 import { resolveFocusedPreference } from "@/lib/studio/settings";
 import { applySessionSettingMutation } from "@/features/agents/state/sessionSettingsMutations";
 import {
@@ -64,6 +64,7 @@ import {
   isGatewayDisconnectLikeError,
   type EventFrame,
 } from "@/lib/gateway/GatewayClient";
+import { useGatewayConnectionContext } from "@/lib/gateway/GatewayConnectionContext";
 import { fetchJson } from "@/lib/http";
 import { bootstrapAgentBrainFilesFromTemplate } from "@/lib/gateway/agentFiles";
 import { deleteAgentViaStudio } from "@/features/agents/operations/deleteAgentOperation";
@@ -177,7 +178,6 @@ const resolveNextNewAgentName = (agents: AgentState[]) => {
 };
 
 const AgentStudioPage = () => {
-  const [settingsCoordinator] = useState(() => createStudioSettingsCoordinator());
   const {
     client,
     status,
@@ -188,7 +188,8 @@ const AgentStudioPage = () => {
     disconnect,
     setGatewayUrl,
     setToken,
-  } = useGatewayConnection(settingsCoordinator);
+    settingsCoordinator,
+  } = useGatewayConnectionContext();
 
   const { state, dispatch, hydrateAgents, setError, setLoading } = useAgentStore();
   const [showConnectionPanel, setShowConnectionPanel] = useState(false);
