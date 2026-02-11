@@ -33,6 +33,12 @@ const injectAuthToken = (params, token) => {
   return next;
 };
 
+const resolveOriginForUpstream = (upstreamUrl) => {
+  const url = new URL(upstreamUrl);
+  const proto = url.protocol === "wss:" ? "https:" : "http:";
+  return `${proto}//${url.host}`;
+};
+
 function createGatewayProxy(options) {
   const {
     loadUpstreamSettings,
@@ -124,7 +130,18 @@ function createGatewayProxy(options) {
           return;
         }
 
-        upstreamWs = new WebSocket(upstreamUrl);
+        let upstreamOrigin = "";
+        try {
+          upstreamOrigin = resolveOriginForUpstream(upstreamUrl);
+        } catch {
+          sendConnectError(
+            "studio.gateway_url_invalid",
+            "Upstream gateway URL is invalid on the Studio host."
+          );
+          return;
+        }
+
+        upstreamWs = new WebSocket(upstreamUrl, { origin: upstreamOrigin });
 
         upstreamWs.on("open", () => {
           upstreamReady = true;
@@ -207,4 +224,3 @@ function createGatewayProxy(options) {
 }
 
 module.exports = { createGatewayProxy };
-
