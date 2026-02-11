@@ -25,7 +25,9 @@ describe("createGatewayProxy", () => {
     const upstreamUrl = `ws://127.0.0.1:${address.port}`;
 
     let seenToken: string | null = null;
-    upstream.on("connection", (ws) => {
+    let seenOrigin: string | undefined;
+    upstream.on("connection", (ws, req) => {
+      seenOrigin = req.headers.origin;
       ws.on("message", (raw) => {
         const parsed = JSON.parse(String(raw));
         if (parsed?.method === "connect") {
@@ -73,10 +75,10 @@ describe("createGatewayProxy", () => {
     await waitForEvent(browser, "message");
 
     expect(seenToken).toBe("token-123");
+    expect(seenOrigin).toBe(`http://localhost:${address.port}`);
 
     browser.close();
     upstream.close();
     await new Promise<void>((resolve) => proxyHttp.close(() => resolve()));
   });
 });
-

@@ -30,7 +30,7 @@ describe("server studio upstream gateway settings", () => {
 
     const { loadUpstreamGatewaySettings } = await import("../../server/studio-settings");
     const settings = loadUpstreamGatewaySettings(process.env);
-    expect(settings.url).toBe("ws://127.0.0.1:18790");
+    expect(settings.url).toBe("ws://localhost:18790");
     expect(settings.token).toBe("tok");
   });
 
@@ -56,4 +56,3 @@ describe("server studio upstream gateway settings", () => {
     expect(settings.token).toBe("tok-local");
   });
 });
-

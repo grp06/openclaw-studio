@@ -56,7 +56,7 @@ const readJsonFile = (filePath) => {
   return JSON.parse(raw);
 };
 
-const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
+const DEFAULT_GATEWAY_URL = "ws://localhost:18789";
 const OPENCLAW_CONFIG_FILENAME = "openclaw.json";
 
 const isRecord = (value) => Boolean(value && typeof value === "object");
@@ -74,7 +74,7 @@ const readOpenclawGatewayDefaults = (env = process.env) => {
     const port =
       typeof gateway.port === "number" && Number.isFinite(gateway.port) ? gateway.port : null;
     if (!token) return null;
-    const url = port ? `ws://127.0.0.1:${port}` : "";
+    const url = port ? `ws://localhost:${port}` : "";
     if (!url) return null;
     return { url, token };
   } catch {

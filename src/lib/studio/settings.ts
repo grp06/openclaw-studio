@@ -31,6 +31,29 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object");
 
 const coerceString = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "0.0.0.0"]);
+
+const normalizeGatewayUrl = (value: unknown) => {
+  const url = coerceString(value);
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    if (!LOOPBACK_HOSTNAMES.has(parsed.hostname.toLowerCase())) {
+      return url;
+    }
+    const auth =
+      parsed.username || parsed.password
+        ? `${parsed.username}${parsed.password ? `:${parsed.password}` : ""}@`
+        : "";
+    const host = parsed.port ? `localhost:${parsed.port}` : "localhost";
+    const dropDefaultPath =
+      parsed.pathname === "/" && !url.endsWith("/") && !parsed.search && !parsed.hash;
+    const pathname = dropDefaultPath ? "" : parsed.pathname;
+    return `${parsed.protocol}//${auth}${host}${pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return url;
+  }
+};
 
 const normalizeGatewayKey = (value: unknown) => {
   const key = coerceString(value);
@@ -94,7 +117,7 @@ const normalizeFocusedPreference = (
 
 const normalizeGatewaySettings = (value: unknown): StudioGatewaySettings | null => {
   if (!isRecord(value)) return null;
-  const url = coerceString(value.url);
+  const url = normalizeGatewayUrl(value.url);
   if (!url) return null;
   const token = coerceString(value.token);
   return { url, token };

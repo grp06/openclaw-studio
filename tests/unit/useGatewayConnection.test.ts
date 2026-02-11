@@ -122,7 +122,7 @@ describe("useGatewayConnection", () => {
     render(createElement(Probe));
 
     await waitFor(() => {
-      expect(screen.getByTestId("gatewayUrl")).toHaveTextContent("ws://127.0.0.1:18789");
+      expect(screen.getByTestId("gatewayUrl")).toHaveTextContent("ws://localhost:18789");
     });
   });
 
@@ -145,6 +145,6 @@ describe("useGatewayConnection", () => {
       expect(captured.url).toBe("ws://localhost:3000/api/gateway/ws");
     });
     expect(captured.token).toBe("");
-    expect(captured.authScopeKey).toBe("ws://127.0.0.1:18789");
+    expect(captured.authScopeKey).toBe("ws://localhost:18789");
   });
 });
