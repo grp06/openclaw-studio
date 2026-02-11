@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Bebas_Neue, IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
 import { AppNav } from "@/components/AppNav";
+import { CommandKListener } from "@/components/CommandKListener";
 import { GatewayConnectionProvider } from "@/lib/gateway/GatewayConnectionContext";
 
 export const metadata: Metadata = {
@@ -46,6 +47,7 @@ export default function RootLayout({
         <GatewayConnectionProvider>
           <div className="flex h-screen overflow-hidden">
             <AppNav />
+            <CommandKListener />
             <main className="flex-1 overflow-auto">{children}</main>
           </div>
         </GatewayConnectionProvider>
