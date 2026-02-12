@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayClient } from "@/lib/gateway/GatewayClient";
 import type { AgentGuidedSetup } from "@/features/agents/operations/createAgentOperation";
-import {
-  applyPendingGuidedSetupForAgent,
-  upsertPendingGuidedSetup,
-} from "@/features/agents/creation/recovery";
+import { applyPendingGuidedSetupForAgent, upsertPendingGuidedSetup } from "@/features/agents/creation/recovery";
 import {
   loadPendingGuidedSetupsFromStorage,
   persistPendingGuidedSetupsToStorage,
@@ -113,5 +110,41 @@ describe("guided setup recovery", () => {
     expect(result.applied).toBe(true);
     expect(result.pendingSetupsByAgentId).toEqual({});
     expect(callLog).not.toContain("agents.create");
+  });
+
+  it("removes only the applied pending setup entry on success", async () => {
+    const setup = createSetup();
+    const otherSetup = createSetup();
+    const client = {
+      call: vi.fn(async (method: string) => {
+        if (method === "config.get") {
+          return {
+            exists: true,
+            hash: "cfg-2",
+            config: { agents: { list: [{ id: "agent-1" }, { id: "agent-2" }] } },
+          };
+        }
+        if (method === "config.set") return { ok: true };
+        if (method === "agents.files.set") return { ok: true };
+        if (method === "exec.approvals.get") {
+          return {
+            exists: true,
+            hash: "ap-2",
+            file: { version: 1, agents: {} },
+          };
+        }
+        if (method === "exec.approvals.set") return { ok: true };
+        throw new Error(`unexpected method ${method}`);
+      }),
+    } as unknown as GatewayClient;
+
+    const result = await applyPendingGuidedSetupForAgent({
+      client,
+      agentId: "agent-1",
+      pendingSetupsByAgentId: { "agent-1": setup, "agent-2": otherSetup },
+    });
+
+    expect(result.applied).toBe(true);
+    expect(result.pendingSetupsByAgentId).toEqual({ "agent-2": otherSetup });
   });
 });

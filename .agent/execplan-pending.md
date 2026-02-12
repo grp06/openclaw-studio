@@ -14,7 +14,7 @@ The behavior should be directly observable in tests and in the UI: pending setup
 
 - [x] (2026-02-12 19:33Z) Reviewed current implementation and converted review findings into concrete hardening scope.
 - [x] (2026-02-12 19:38Z) Milestone 1 complete: added gateway-scoped pending setup persistence, safe storage wrappers, scope-aware page load/persist effects, and passing storage tests.
-- [ ] Milestone 2: Unify guided setup retry orchestration and prevent duplicate/in-flight conflicts.
+- [x] (2026-02-12 19:41Z) Milestone 2 complete: added pure retry coordination helpers, unified setup-apply path across auto/manual/restart flows, removed stale-map replacement writes, and passed retry/recovery tests.
 - [ ] Milestone 3: Run full verification and update reliability docs for the new behavior.
 
 ## Surprises & Discoveries
@@ -30,6 +30,9 @@ The behavior should be directly observable in tests and in the UI: pending setup
 
 - Observation: Scope-aware persistence needs a loaded-scope guard; a plain boolean loaded flag can persist stale entries under a newly selected gateway scope.
   Evidence: During Milestone 1 implementation, `pendingCreateSetupsLoadedScope` replaced boolean gating to avoid cross-scope writes before the new scope load effect runs.
+
+- Observation: Restart-complete and reconnect-auto-retry both target the same pending setup queue, so deduplication must live in shared orchestration logic, not in per-caller conditions.
+  Evidence: Milestone 2 introduced shared in-flight guards and a single apply callback used by all retry entry points.
 
 ## Decision Log
 
@@ -47,6 +50,14 @@ The behavior should be directly observable in tests and in the UI: pending setup
 
 - Decision: Persistence effects will be gated by `pendingCreateSetupsLoadedScope === pendingGuidedSetupGatewayScope`.
   Rationale: This prevents stale in-memory entries from being written to the wrong gateway scope during gateway URL transitions.
+  Date/Author: 2026-02-12 / Codex
+
+- Decision: Auto-retry target selection will be deterministic (sorted agent IDs) and filtered by known/attempted/in-flight sets.
+  Rationale: Deterministic selection simplifies reasoning, testing, and replayability of retry behavior.
+  Date/Author: 2026-02-12 / Codex
+
+- Decision: Successful apply paths will always remove pending entries with functional state updates (`current => removePendingGuidedSetup(current, id)`).
+  Rationale: Functional updates prevent stale snapshot overwrites during concurrent state transitions.
   Date/Author: 2026-02-12 / Codex
 
 ## Outcomes & Retrospective

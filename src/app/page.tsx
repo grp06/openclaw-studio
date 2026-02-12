@@ -74,6 +74,11 @@ import {
   upsertPendingGuidedSetup,
 } from "@/features/agents/creation/recovery";
 import {
+  beginPendingGuidedSetupRetry,
+  endPendingGuidedSetupRetry,
+  selectNextPendingGuidedSetupRetryAgentId,
+} from "@/features/agents/creation/pendingSetupRetry";
+import {
   loadPendingGuidedSetupsFromStorage,
   normalizePendingGuidedSetupGatewayScope,
   persistPendingGuidedSetupsToStorage,
@@ -289,6 +294,7 @@ const AgentStudioPage = () => {
   );
   const specialUpdateRef = useRef<Map<string, string>>(new Map());
   const specialUpdateInFlightRef = useRef<Set<string>>(new Set());
+  const pendingCreateSetupsByAgentIdRef = useRef<Record<string, AgentGuidedSetup>>({});
   const pendingDraftValuesRef = useRef<Map<string, string>>(new Map());
   const pendingDraftTimersRef = useRef<Map<string, number>>(new Map());
   const pendingLivePatchesRef = useRef<Map<string, Partial<AgentState>>>(new Map());
@@ -698,9 +704,67 @@ const AgentStudioPage = () => {
     status,
   ]);
 
+  const applyPendingCreateSetupForAgentId = useCallback(
+    async (params: { agentId: string; source: "auto" | "manual" | "restart" }) => {
+      const resolvedAgentId = params.agentId.trim();
+      if (!resolvedAgentId) return false;
+      if (
+        retryPendingSetupBusyAgentId &&
+        retryPendingSetupBusyAgentId !== resolvedAgentId
+      ) {
+        return false;
+      }
+      if (!beginPendingGuidedSetupRetry(pendingSetupAutoRetryInFlightRef.current, resolvedAgentId)) {
+        return false;
+      }
+      const pendingSetup = pendingCreateSetupsByAgentIdRef.current[resolvedAgentId];
+      if (!pendingSetup) {
+        endPendingGuidedSetupRetry(pendingSetupAutoRetryInFlightRef.current, resolvedAgentId);
+        return false;
+      }
+      setRetryPendingSetupBusyAgentId(resolvedAgentId);
+      try {
+        const applied = await applyPendingGuidedSetupForAgent({
+          client,
+          agentId: resolvedAgentId,
+          pendingSetupsByAgentId: pendingCreateSetupsByAgentIdRef.current,
+        });
+        if (!applied.applied) return false;
+        setPendingCreateSetupsByAgentId((current) =>
+          removePendingGuidedSetup(current, resolvedAgentId)
+        );
+        await loadAgents();
+        return true;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Retrying guided setup failed.";
+        const agentName =
+          stateRef.current.agents.find((agent) => agent.agentId === resolvedAgentId)?.name ??
+          resolvedAgentId;
+        if (params.source === "manual") {
+          setError(`Guided setup retry failed for "${agentName}". ${message}`);
+        } else {
+          setError(
+            `Agent "${agentName}" was created, but guided setup is still pending. Retry or discard setup from chat. ${message}`
+          );
+        }
+        return false;
+      } finally {
+        endPendingGuidedSetupRetry(pendingSetupAutoRetryInFlightRef.current, resolvedAgentId);
+        setRetryPendingSetupBusyAgentId((current) =>
+          current === resolvedAgentId ? null : current
+        );
+      }
+    },
+    [client, loadAgents, retryPendingSetupBusyAgentId, setError]
+  );
+
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    pendingCreateSetupsByAgentIdRef.current = pendingCreateSetupsByAgentId;
+  }, [pendingCreateSetupsByAgentId]);
 
   useEffect(() => {
     if (status === "connected") return;
@@ -818,64 +882,30 @@ const AgentStudioPage = () => {
     if (status !== "connected") return;
     if (!agentsLoadedOnce) return;
     if (pendingCreateSetupsLoadedScope !== pendingGuidedSetupGatewayScope) return;
+    if (createAgentBlock && createAgentBlock.phase !== "queued") return;
     if (retryPendingSetupBusyAgentId) return;
 
-    const knownAgentIds = new Set(agents.map((agent) => agent.agentId));
-    let targetAgentId: string | null = null;
-    for (const agentId of Object.keys(pendingCreateSetupsByAgentId)) {
-      if (!knownAgentIds.has(agentId)) continue;
-      if (pendingSetupAutoRetryAttemptedRef.current.has(agentId)) continue;
-      if (pendingSetupAutoRetryInFlightRef.current.has(agentId)) continue;
-      targetAgentId = agentId;
-      break;
-    }
+    const targetAgentId = selectNextPendingGuidedSetupRetryAgentId({
+      pendingSetupsByAgentId: pendingCreateSetupsByAgentId,
+      knownAgentIds: new Set(agents.map((agent) => agent.agentId)),
+      attemptedAgentIds: pendingSetupAutoRetryAttemptedRef.current,
+      inFlightAgentIds: pendingSetupAutoRetryInFlightRef.current,
+    });
     if (!targetAgentId) return;
-
-    const setup = pendingCreateSetupsByAgentId[targetAgentId];
-    if (!setup) return;
     pendingSetupAutoRetryAttemptedRef.current.add(targetAgentId);
-    pendingSetupAutoRetryInFlightRef.current.add(targetAgentId);
-    setRetryPendingSetupBusyAgentId(targetAgentId);
-    void (async () => {
-      try {
-        const applied = await applyPendingGuidedSetupForAgent({
-          client,
-          agentId: targetAgentId,
-          pendingSetupsByAgentId: {
-            [targetAgentId]: setup,
-          },
-        });
-        if (!applied.applied) return;
-        setPendingCreateSetupsByAgentId((current) =>
-          removePendingGuidedSetup(current, targetAgentId)
-        );
-        await loadAgents();
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Retrying guided setup failed.";
-        const agentName =
-          stateRef.current.agents.find((agent) => agent.agentId === targetAgentId)?.name ??
-          targetAgentId;
-        setError(
-          `Agent "${agentName}" was created, but guided setup is still pending. Retry or discard setup from chat. ${message}`
-        );
-      } finally {
-        pendingSetupAutoRetryInFlightRef.current.delete(targetAgentId);
-        setRetryPendingSetupBusyAgentId((current) =>
-          current === targetAgentId ? null : current
-        );
-      }
-    })();
+    void applyPendingCreateSetupForAgentId({
+      agentId: targetAgentId,
+      source: "auto",
+    });
   }, [
     agents,
     agentsLoadedOnce,
-    client,
-    loadAgents,
+    applyPendingCreateSetupForAgentId,
+    createAgentBlock,
     pendingCreateSetupsByAgentId,
     pendingCreateSetupsLoadedScope,
     pendingGuidedSetupGatewayScope,
     retryPendingSetupBusyAgentId,
-    setError,
     status,
   ]);
 
@@ -1623,30 +1653,19 @@ const AgentStudioPage = () => {
       if (newAgentId) {
         dispatch({ type: "selectAgent", agentId: newAgentId });
       }
-      const pendingSetup = newAgentId ? pendingCreateSetupsByAgentId[newAgentId] ?? null : null;
+      const pendingSetup = newAgentId
+        ? pendingCreateSetupsByAgentIdRef.current[newAgentId] ?? null
+        : null;
       if (newAgentId && pendingSetup) {
+        pendingSetupAutoRetryAttemptedRef.current.add(newAgentId);
         setCreateAgentBlock((current) => {
           if (!current || current.agentId !== newAgentId) return current;
           return { ...current, phase: "applying-setup" };
         });
-        try {
-          const applied = await applyPendingGuidedSetupForAgent({
-            client,
-            agentId: newAgentId,
-            pendingSetupsByAgentId: pendingCreateSetupsByAgentId,
-          });
-          if (applied.applied) {
-            setPendingCreateSetupsByAgentId(applied.pendingSetupsByAgentId);
-          }
-        } catch (err) {
-          const message =
-            err instanceof Error
-              ? err.message
-              : "Agent was created, but guided setup failed.";
-          setError(
-            `Agent was created, but guided setup is still pending. Retry or discard setup from chat. ${message}`
-          );
-        }
+        await applyPendingCreateSetupForAgentId({
+          agentId: newAgentId,
+          source: "restart",
+        });
       }
       setCreateAgentBlock(null);
       setCreateAgentModalOpen(false);
@@ -1844,34 +1863,12 @@ const AgentStudioPage = () => {
     async (agentId: string) => {
       const resolvedAgentId = agentId.trim();
       if (!resolvedAgentId) return;
-      if (retryPendingSetupBusyAgentId) return;
-      const pendingSetup = pendingCreateSetupsByAgentId[resolvedAgentId];
-      if (!pendingSetup) return;
-      setRetryPendingSetupBusyAgentId(resolvedAgentId);
-      try {
-        const applied = await applyPendingGuidedSetupForAgent({
-          client,
-          agentId: resolvedAgentId,
-          pendingSetupsByAgentId: pendingCreateSetupsByAgentId,
-        });
-        if (applied.applied) {
-          setPendingCreateSetupsByAgentId(applied.pendingSetupsByAgentId);
-          await loadAgents();
-        }
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Retrying guided setup failed.";
-        const agentName =
-          stateRef.current.agents.find((agent) => agent.agentId === resolvedAgentId)?.name ??
-          resolvedAgentId;
-        setError(`Guided setup retry failed for "${agentName}". ${message}`);
-      } finally {
-        setRetryPendingSetupBusyAgentId((current) =>
-          current === resolvedAgentId ? null : current
-        );
-      }
+      await applyPendingCreateSetupForAgentId({
+        agentId: resolvedAgentId,
+        source: "manual",
+      });
     },
-    [client, loadAgents, pendingCreateSetupsByAgentId, retryPendingSetupBusyAgentId, setError]
+    [applyPendingCreateSetupForAgentId]
   );
 
   const handleDiscardPendingCreateSetup = useCallback((agentId: string) => {
