@@ -25,20 +25,20 @@ describe("AgentCreateModal", () => {
     cleanup();
   });
 
-  it("submits guided payload through starter-kit flow", () => {
+  it("submits guided payload through preset-bundle flow", () => {
     const onSubmit = vi.fn();
     openModal({ onSubmit });
 
-    fireEvent.click(screen.getByRole("button", { name: "Researcher starter kit" }));
+    fireEvent.click(screen.getByRole("button", { name: "PR Engineer preset bundle" }));
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    fireEvent.click(screen.getByRole("button", { name: "Conservative control level" }));
+    fireEvent.click(screen.getByRole("button", { name: "Balanced control level" }));
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
     fireEvent.change(screen.getByLabelText("Agent name"), {
-      target: { value: "Research Agent" },
+      target: { value: "PR Agent" },
     });
     fireEvent.change(screen.getByLabelText("First task"), {
-      target: { value: "Investigate competitor positioning and summarize findings." },
+      target: { value: "Fix one failing test and ship a minimal patch." },
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -47,34 +47,42 @@ describe("AgentCreateModal", () => {
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: "guided",
-        name: "Research Agent",
+        name: "PR Agent",
         draft: expect.objectContaining({
-          starterKit: "researcher",
-          controlLevel: "conservative",
-          firstTask: "Investigate competitor positioning and summarize findings.",
+          starterKit: "engineer",
+          controlLevel: "balanced",
+          firstTask: "Fix one failing test and ship a minimal patch.",
         }),
       })
     );
   });
 
-  it("shows starter-derived summary in review", () => {
+  it("renders grouped preset sections and capability chips", () => {
     openModal();
 
-    fireEvent.click(screen.getByRole("button", { name: "Researcher starter kit" }));
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    fireEvent.click(screen.getByRole("button", { name: "Conservative control level" }));
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Knowledge")).toBeInTheDocument();
+    expect(screen.getByText("Builder")).toBeInTheDocument();
+    expect(screen.getByText("Operations")).toBeInTheDocument();
+    expect(screen.getByText("Baseline")).toBeInTheDocument();
+    expect(screen.getAllByText("Exec: On").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Internet: Off").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Sandbox: non-main").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Risk: Moderate").length).toBeGreaterThan(0);
+  });
 
-    expect(screen.getByText(/Starter: Researcher/i)).toBeInTheDocument();
-    expect(screen.getByText(/Tools profile: minimal/i)).toBeInTheDocument();
+  it("shows non-main sandbox caveat on preset cards", () => {
+    openModal();
+
+    expect(
+      screen.getAllByText("Sandbox mode non-main does not sandbox the agent main session.").length
+    ).toBeGreaterThan(0);
   });
 
   it("allows advanced controls for runtime tool additions", () => {
     const onSubmit = vi.fn();
     openModal({ onSubmit });
 
-    fireEvent.click(screen.getByRole("button", { name: "Engineer starter kit" }));
+    fireEvent.click(screen.getByRole("button", { name: "PR Engineer preset bundle" }));
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     fireEvent.click(screen.getByRole("button", { name: "Balanced control level" }));
     fireEvent.click(screen.getByRole("button", { name: "Next" }));

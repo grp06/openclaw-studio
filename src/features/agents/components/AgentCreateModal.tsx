@@ -4,12 +4,15 @@ import { useMemo, useState } from "react";
 import {
   compileGuidedAgentCreation,
   createDefaultGuidedDraft,
+  deriveGuidedPresetCapabilitySummary,
+  GUIDED_PRESET_BUNDLES,
   resolveGuidedControlsForPreset,
+  resolveGuidedDraftFromPresetBundle,
 } from "@/features/agents/creation/compiler";
 import type {
   AgentControlLevel,
   AgentCreateModalSubmitPayload,
-  AgentStarterKit,
+  AgentPresetBundle,
   GuidedAgentCreationDraft,
 } from "@/features/agents/creation/types";
 
@@ -35,38 +38,6 @@ const fieldClassName =
 const labelClassName =
   "font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
 
-const STARTER_OPTIONS: Array<{
-  id: AgentStarterKit;
-  title: string;
-  description: string;
-}> = [
-  {
-    id: "researcher",
-    title: "Researcher",
-    description: "Evidence-first synthesis and safe recommendations.",
-  },
-  {
-    id: "engineer",
-    title: "Engineer",
-    description: "Code changes with tests and bounded execution.",
-  },
-  {
-    id: "marketer",
-    title: "Marketer",
-    description: "Draft campaigns and growth assets without auto-publishing.",
-  },
-  {
-    id: "chief-of-staff",
-    title: "Chief of Staff",
-    description: "Planning, follow-ups, and operations summaries.",
-  },
-  {
-    id: "blank",
-    title: "Blank",
-    description: "General-purpose baseline with conservative defaults.",
-  },
-];
-
 const CONTROL_LEVEL_OPTIONS: Array<{
   id: AgentControlLevel;
   title: string;
@@ -89,6 +60,19 @@ const CONTROL_LEVEL_OPTIONS: Array<{
   },
 ];
 
+const PRESET_GROUP_LABELS: Record<(typeof GUIDED_PRESET_BUNDLES)[number]["group"], string> = {
+  knowledge: "Knowledge",
+  builder: "Builder",
+  operations: "Operations",
+  baseline: "Baseline",
+};
+
+const titleCase = (value: string): string =>
+  value
+    .split("-")
+    .map((part) => (part.length > 0 ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part))
+    .join(" ");
+
 export const AgentCreateModal = ({
   open,
   suggestedName,
@@ -101,6 +85,9 @@ export const AgentCreateModal = ({
   const [name, setName] = useState(() => suggestedName);
   const [guidedDraft, setGuidedDraft] = useState<GuidedAgentCreationDraft>(
     createDefaultGuidedDraft
+  );
+  const [selectedPresetBundle, setSelectedPresetBundle] = useState<AgentPresetBundle | null>(
+    "pr-engineer"
   );
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -135,18 +122,37 @@ export const AgentCreateModal = ({
     setStepIndex((current) => Math.max(0, current - 1));
   };
 
-  const updateStarterKit = (starterKit: AgentStarterKit) => {
+  const presetCards = useMemo(
+    () =>
+      GUIDED_PRESET_BUNDLES.map((preset) => {
+        const draft = resolveGuidedDraftFromPresetBundle({
+          bundle: preset.id,
+          seed: createDefaultGuidedDraft(),
+        });
+        const capability = deriveGuidedPresetCapabilitySummary({
+          controls: draft.controls,
+          heartbeatEnabled: draft.heartbeatEnabled,
+        });
+        return {
+          ...preset,
+          capability,
+        };
+      }),
+    []
+  );
+
+  const updatePresetBundle = (bundle: AgentPresetBundle) => {
+    setSelectedPresetBundle(bundle);
     setGuidedDraft((current) => ({
-      ...current,
-      starterKit,
-      controls: resolveGuidedControlsForPreset({
-        starterKit,
-        controlLevel: current.controlLevel,
+      ...resolveGuidedDraftFromPresetBundle({
+        bundle,
+        seed: current,
       }),
     }));
   };
 
   const updateControlLevel = (controlLevel: AgentControlLevel) => {
+    setSelectedPresetBundle(null);
     setGuidedDraft((current) => ({
       ...current,
       controlLevel,
@@ -200,28 +206,55 @@ export const AgentCreateModal = ({
           {stepKey === "starter" ? (
             <div className="grid gap-3" data-testid="agent-create-starter-step">
               <div className="text-sm text-muted-foreground">
-                Pick a starter kit. You can edit details after creation.
+                Pick a preset bundle. You can still customize controls before creation.
               </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                {STARTER_OPTIONS.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    aria-label={`${option.title} starter kit`}
-                    className={`rounded-md border px-4 py-4 text-left transition ${
-                      guidedDraft.starterKit === option.id
-                        ? "border-border bg-surface-2"
-                        : "border-border/80 bg-surface-1 hover:border-border hover:bg-surface-2"
-                    }`}
-                    onClick={() => updateStarterKit(option.id)}
-                  >
-                    <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                      {option.title}
-                    </div>
-                    <div className="mt-2 text-sm text-foreground">{option.description}</div>
-                  </button>
-                ))}
-              </div>
+              {Object.entries(PRESET_GROUP_LABELS).map(([group, groupLabel]) => (
+                <div key={group} className="grid gap-2">
+                  <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    {groupLabel}
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {presetCards
+                      .filter((preset) => preset.group === group)
+                      .map((preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          aria-label={`${preset.title} preset bundle`}
+                          className={`rounded-md border px-4 py-4 text-left transition ${
+                            selectedPresetBundle === preset.id
+                              ? "border-border bg-surface-2"
+                              : "border-border/80 bg-surface-1 hover:border-border hover:bg-surface-2"
+                          }`}
+                          onClick={() => updatePresetBundle(preset.id)}
+                        >
+                          <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                            {preset.title}
+                          </div>
+                          <div className="mt-2 text-sm text-foreground">{preset.description}</div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {preset.capability.chips.map((chip) => (
+                              <span
+                                key={`${preset.id}-${chip.id}`}
+                                className="rounded border border-border/70 bg-surface-3 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground"
+                              >
+                                {chip.label}: {chip.value}
+                              </span>
+                            ))}
+                          </div>
+                          <div className="mt-2 text-xs font-semibold text-foreground">
+                            Risk: {titleCase(preset.capability.risk)}
+                          </div>
+                          {preset.capability.caveats.map((caveat) => (
+                            <div key={`${preset.id}-${caveat}`} className="mt-1 text-xs text-muted-foreground">
+                              {caveat}
+                            </div>
+                          ))}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              ))}
             </div>
           ) : null}
 
