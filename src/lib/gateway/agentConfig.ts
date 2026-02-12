@@ -292,9 +292,9 @@ const shouldRetryConfigWrite = (err: unknown) => {
   return /re-run config\.get|config changed since last load/i.test(err.message);
 };
 
-const applyGatewayConfigSet = async (params: {
+const applyGatewayConfigPatch = async (params: {
   client: GatewayClient;
-  nextConfig: Record<string, unknown>;
+  patch: Record<string, unknown>;
   baseHash?: string | null;
   exists?: boolean;
   attempt?: number;
@@ -306,15 +306,15 @@ const applyGatewayConfigSet = async (params: {
     throw new Error("Gateway config hash unavailable; re-run config.get.");
   }
   const payload: Record<string, unknown> = {
-    raw: JSON.stringify(params.nextConfig, null, 2),
+    raw: JSON.stringify(params.patch, null, 2),
   };
   if (baseHash) payload.baseHash = baseHash;
   try {
-    await params.client.call("config.set", payload);
+    await params.client.call("config.patch", payload);
   } catch (err) {
     if (attempt < 1 && shouldRetryConfigWrite(err)) {
       const snapshot = await params.client.call<GatewayConfigSnapshot>("config.get", {});
-      return applyGatewayConfigSet({
+      return applyGatewayConfigPatch({
         ...params,
         baseHash: snapshot.hash ?? undefined,
         exists: snapshot.exists,
@@ -427,9 +427,9 @@ export const updateGatewayHeartbeat = async (params: {
     return next;
   });
   const nextConfig = writeConfigAgentList(baseConfig, nextList);
-  await applyGatewayConfigSet({
+  await applyGatewayConfigPatch({
     client: params.client,
-    nextConfig,
+    patch: { agents: { list: nextList } },
     baseHash: snapshot.hash ?? undefined,
     exists: snapshot.exists,
   });
@@ -455,9 +455,9 @@ export const removeGatewayHeartbeatOverride = async (params: {
     return resolveHeartbeatSettings(baseConfig, params.agentId);
   }
   const nextConfig = writeConfigAgentList(baseConfig, nextList);
-  await applyGatewayConfigSet({
+  await applyGatewayConfigPatch({
     client: params.client,
-    nextConfig,
+    patch: { agents: { list: nextList } },
     baseHash: snapshot.hash ?? undefined,
     exists: snapshot.exists,
   });
@@ -520,10 +520,12 @@ export const updateGatewayAgentOverrides = async (params: {
       const allow = normalizeToolList(params.overrides.tools?.allow);
       if (allow !== undefined) {
         currentTools.allow = allow;
+        delete currentTools.alsoAllow;
       }
       const alsoAllow = normalizeToolList(params.overrides.tools?.alsoAllow);
       if (alsoAllow !== undefined) {
         currentTools.alsoAllow = alsoAllow;
+        delete currentTools.allow;
       }
       const deny = normalizeToolList(params.overrides.tools?.deny);
       if (deny !== undefined) {
@@ -535,10 +537,9 @@ export const updateGatewayAgentOverrides = async (params: {
     return next;
   });
 
-  const nextConfig = writeConfigAgentList(baseConfig, nextList);
-  await applyGatewayConfigSet({
+  await applyGatewayConfigPatch({
     client: params.client,
-    nextConfig,
+    patch: { agents: { list: nextList } },
     baseHash: snapshot.hash ?? undefined,
     exists: snapshot.exists,
   });

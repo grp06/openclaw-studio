@@ -208,7 +208,7 @@ describe("gateway agent helpers", () => {
     expect(result.hasOverride).toBe(true);
   });
 
-  it("updates heartbeat overrides via config.set", async () => {
+  it("updates heartbeat overrides via config.patch", async () => {
     const client = {
       call: vi.fn(async (method: string, params?: unknown) => {
         if (method === "config.get") {
@@ -231,7 +231,7 @@ describe("gateway agent helpers", () => {
             },
           };
         }
-        if (method === "config.set") {
+        if (method === "config.patch") {
           const raw = (params as { raw?: string }).raw ?? "";
           const parsed = JSON.parse(raw) as {
             agents?: { list?: Array<{ id?: string; heartbeat?: unknown }> };

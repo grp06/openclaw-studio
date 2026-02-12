@@ -738,6 +738,10 @@ const AgentStudioPage = () => {
         await loadAgents();
         return true;
       } catch (err) {
+        const disconnectLike = isGatewayDisconnectLikeError(err);
+        if (disconnectLike && params.source !== "manual") {
+          return false;
+        }
         const message = err instanceof Error ? err.message : "Retrying guided setup failed.";
         const agentName =
           stateRef.current.agents.find((agent) => agent.agentId === resolvedAgentId)?.name ??
@@ -870,6 +874,13 @@ const AgentStudioPage = () => {
     pendingSetupAutoRetryInFlightRef.current.clear();
     setRetryPendingSetupBusyAgentId(null);
   }, [pendingGuidedSetupGatewayScope]);
+
+  useEffect(() => {
+    if (status === "connected") return;
+    pendingSetupAutoRetryAttemptedRef.current.clear();
+    pendingSetupAutoRetryInFlightRef.current.clear();
+    setRetryPendingSetupBusyAgentId(null);
+  }, [status]);
 
   useEffect(() => {
     if (pendingCreateSetupsLoadedScope !== pendingGuidedSetupGatewayScope) return;
@@ -1533,19 +1544,16 @@ const AgentStudioPage = () => {
         return;
       }
 
-      let setup: AgentGuidedSetup | null = null;
-      if (payload.mode === "guided") {
-        const compiled = compileGuidedAgentCreation({ name, draft: payload.draft });
-        if (compiled.validation.errors.length > 0) {
-          setCreateAgentModalError(compiled.validation.errors[0] ?? "Guided setup is incomplete.");
-          return;
-        }
-        setup = {
-          agentOverrides: compiled.agentOverrides,
-          files: compiled.files,
-          execApprovals: compiled.execApprovals,
-        };
+      const compiled = compileGuidedAgentCreation({ name, draft: payload.draft });
+      if (compiled.validation.errors.length > 0) {
+        setCreateAgentModalError(compiled.validation.errors[0] ?? "Guided setup is incomplete.");
+        return;
       }
+      const setup: AgentGuidedSetup = {
+        agentOverrides: compiled.agentOverrides,
+        files: compiled.files,
+        execApprovals: compiled.execApprovals,
+      };
 
       setCreateAgentBusy(true);
       setCreateAgentModalError(null);
@@ -1574,27 +1582,25 @@ const AgentStudioPage = () => {
             setMobilePane("chat");
             if (isLocalGateway) {
               let localSetupError: string | null = null;
-              if (setup) {
-                setCreateAgentBlock((current) => {
-                  if (!current || current.agentName !== name) return current;
-                  return { ...current, agentId: created.id, phase: "applying-setup" };
+              setCreateAgentBlock((current) => {
+                if (!current || current.agentName !== name) return current;
+                return { ...current, agentId: created.id, phase: "applying-setup" };
+              });
+              try {
+                await applyGuidedAgentSetup({
+                  client,
+                  agentId: created.id,
+                  setup,
                 });
-                try {
-                  await applyGuidedAgentSetup({
-                    client,
-                    agentId: created.id,
-                    setup,
-                  });
-                  setPendingCreateSetupsByAgentId((current) =>
-                    removePendingGuidedSetup(current, created.id)
-                  );
-                } catch (err) {
-                  localSetupError =
-                    err instanceof Error ? err.message : "Agent setup failed.";
-                  setPendingCreateSetupsByAgentId((current) =>
-                    upsertPendingGuidedSetup(current, created.id, setup)
-                  );
-                }
+                setPendingCreateSetupsByAgentId((current) =>
+                  removePendingGuidedSetup(current, created.id)
+                );
+              } catch (err) {
+                localSetupError =
+                  err instanceof Error ? err.message : "Agent setup failed.";
+                setPendingCreateSetupsByAgentId((current) =>
+                  upsertPendingGuidedSetup(current, created.id, setup)
+                );
               }
               await loadAgents();
               setCreateAgentBlock(null);
@@ -1606,11 +1612,9 @@ const AgentStudioPage = () => {
               }
               return;
             }
-            if (setup) {
-              setPendingCreateSetupsByAgentId((current) =>
-                upsertPendingGuidedSetup(current, created.id, setup)
-              );
-            }
+            setPendingCreateSetupsByAgentId((current) =>
+              upsertPendingGuidedSetup(current, created.id, setup)
+            );
             const shouldAwaitRestart = await shouldAwaitDisconnectRestartForRemoteMutation({
               client,
               cachedConfigSnapshot: gatewayConfigSnapshot,
@@ -1630,31 +1634,29 @@ const AgentStudioPage = () => {
               return;
             }
             let remoteSetupError: string | null = null;
-            if (setup) {
-              setCreateAgentBlock((current) => {
-                if (!current || current.agentName !== name) return current;
-                return {
-                  ...current,
-                  agentId: created.id,
-                  phase: "applying-setup",
-                };
+            setCreateAgentBlock((current) => {
+              if (!current || current.agentName !== name) return current;
+              return {
+                ...current,
+                agentId: created.id,
+                phase: "applying-setup",
+              };
+            });
+            try {
+              await applyGuidedAgentSetup({
+                client,
+                agentId: created.id,
+                setup,
               });
-              try {
-                await applyGuidedAgentSetup({
-                  client,
-                  agentId: created.id,
-                  setup,
-                });
-                setPendingCreateSetupsByAgentId((current) =>
-                  removePendingGuidedSetup(current, created.id)
-                );
-              } catch (err) {
-                remoteSetupError =
-                  err instanceof Error ? err.message : "Agent setup failed.";
-                setPendingCreateSetupsByAgentId((current) =>
-                  upsertPendingGuidedSetup(current, created.id, setup)
-                );
-              }
+              setPendingCreateSetupsByAgentId((current) =>
+                removePendingGuidedSetup(current, created.id)
+              );
+            } catch (err) {
+              remoteSetupError =
+                err instanceof Error ? err.message : "Agent setup failed.";
+              setPendingCreateSetupsByAgentId((current) =>
+                upsertPendingGuidedSetup(current, created.id, setup)
+              );
             }
             await loadAgents();
             setCreateAgentBlock(null);

@@ -87,7 +87,7 @@ describe("guided setup recovery", () => {
             config: { agents: { list: [{ id: "agent-1" }] } },
           };
         }
-        if (method === "config.set") return { ok: true };
+        if (method === "config.patch") return { ok: true };
         if (method === "agents.files.set") return { ok: true };
         if (method === "exec.approvals.get") {
           return {
@@ -124,7 +124,7 @@ describe("guided setup recovery", () => {
             config: { agents: { list: [{ id: "agent-1" }, { id: "agent-2" }] } },
           };
         }
-        if (method === "config.set") return { ok: true };
+        if (method === "config.patch") return { ok: true };
         if (method === "agents.files.set") return { ok: true };
         if (method === "exec.approvals.get") {
           return {

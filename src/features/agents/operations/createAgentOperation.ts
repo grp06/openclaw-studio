@@ -33,11 +33,6 @@ export const applyGuidedAgentSetup = async (params: {
   if (!agentId) {
     throw new Error("Agent id is required.");
   }
-  await updateGatewayAgentOverrides({
-    client: params.client,
-    agentId,
-    overrides: params.setup.agentOverrides,
-  });
   await writeGatewayAgentFiles({
     client: params.client,
     agentId,
@@ -47,6 +42,11 @@ export const applyGuidedAgentSetup = async (params: {
     client: params.client,
     agentId,
     policy: params.setup.execApprovals,
+  });
+  await updateGatewayAgentOverrides({
+    client: params.client,
+    agentId,
+    overrides: params.setup.agentOverrides,
   });
 };
 

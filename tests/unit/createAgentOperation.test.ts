@@ -38,7 +38,7 @@ describe("createAgentOperation", () => {
         if (method === "agents.create") {
           return { ok: true, agentId: "agent-1", name: "Agent 1" };
         }
-        if (method === "config.set") {
+        if (method === "config.patch") {
           const raw = (params as { raw: string }).raw;
           const parsed = JSON.parse(raw) as {
             agents?: { list?: Array<{ id: string; sandbox?: unknown; tools?: unknown }> };
@@ -131,8 +131,10 @@ describe("createAgentOperation", () => {
 
   it("applies setup directly when requested", async () => {
     const setup = createSetup();
+    const calls: string[] = [];
     const client = {
       call: vi.fn(async (method: string) => {
+        calls.push(method);
         if (method === "config.get") {
           return {
             exists: true,
@@ -140,7 +142,7 @@ describe("createAgentOperation", () => {
             config: { agents: { list: [{ id: "agent-3" }] } },
           };
         }
-        if (method === "config.set") return { ok: true };
+        if (method === "config.patch") return { ok: true };
         if (method === "agents.files.set") return { ok: true };
         if (method === "exec.approvals.get") {
           return { exists: true, hash: "ap-2", file: { version: 1, agents: {} } };
@@ -157,5 +159,12 @@ describe("createAgentOperation", () => {
         setup,
       })
     ).resolves.toBeUndefined();
+
+    const lastFilesSet = Math.max(
+      calls.lastIndexOf("agents.files.set"),
+      calls.lastIndexOf("exec.approvals.set")
+    );
+    expect(lastFilesSet).toBeGreaterThanOrEqual(0);
+    expect(calls.lastIndexOf("config.patch")).toBeGreaterThan(lastFilesSet);
   });
 });

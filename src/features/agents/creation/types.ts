@@ -43,18 +43,11 @@ export type GuidedAgentCreationDraft = {
   controls: GuidedCreationControls;
 };
 
-export type AgentCreateMode = "basic" | "guided";
-
-export type AgentCreateModalSubmitPayload =
-  | {
-      mode: "basic";
-      name: string;
-    }
-  | {
-      mode: "guided";
-      name: string;
-      draft: GuidedAgentCreationDraft;
-    };
+export type AgentCreateModalSubmitPayload = {
+  mode: "guided";
+  name: string;
+  draft: GuidedAgentCreationDraft;
+};
 
 export type GuidedExecApprovalsPolicy = {
   security: GatewayExecApprovalSecurity;
