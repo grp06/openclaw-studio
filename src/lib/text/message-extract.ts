@@ -491,6 +491,7 @@ const PROJECT_PROMPT_BLOCK_RE = /^(?:Project|Workspace) path:[\s\S]*?\n\s*\n/i;
 const PROJECT_PROMPT_INLINE_RE = /^(?:Project|Workspace) path:[\s\S]*?memory_search\.\s*/i;
 const RESET_PROMPT_RE =
   /^A new session was started via \/new or \/reset[\s\S]*?reasoning\.\s*/i;
+const SYSTEM_EVENT_BLOCK_RE = /^System:\s*\[[^\]]+\][\s\S]*?\n\s*\n/;
 const MESSAGE_ID_RE = /\s*\[message_id:[^\]]+\]\s*/gi;
 const UI_METADATA_PREFIX_RE =
   /^(?:Project path:|Workspace path:|A new session was started via \/new or \/reset)/i;
@@ -500,6 +501,7 @@ const HEARTBEAT_PATH_RE = /Heartbeat file path:/i;
 export const stripUiMetadata = (text: string) => {
   if (!text) return text;
   let cleaned = text.replace(RESET_PROMPT_RE, "");
+  cleaned = cleaned.replace(SYSTEM_EVENT_BLOCK_RE, "");
   const beforeProjectStrip = cleaned;
   cleaned = cleaned.replace(PROJECT_PROMPT_INLINE_RE, "");
   if (cleaned === beforeProjectStrip) {

@@ -89,4 +89,13 @@ describe("message-extract", () => {
     expect(isUiMetadataPrefix(built)).toBe(false);
     expect(stripUiMetadata(built)).toBe("hello");
   });
+
+  it("strips leading system event blocks from queued session updates", () => {
+    const raw = `System: [2026-02-12 01:09:16 UTC] Exec failed (mild-she, signal SIGKILL)
+
+[Thu 2026-02-12 01:14 UTC] nope none of those are it. keep looking
+[message_id: e050a641-aa32-4950-8083-c3bb7efdfc6d]`;
+
+    expect(stripUiMetadata(raw)).toBe("[Thu 2026-02-12 01:14 UTC] nope none of those are it. keep looking");
+  });
 });
