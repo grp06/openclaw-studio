@@ -270,8 +270,8 @@ describe("agent store", () => {
     });
 
     expect(getFilteredAgents(state, "all").map((agent) => agent.agentId)).toEqual([
-      "agent-1",
       "agent-2",
+      "agent-1",
       "agent-3",
     ]);
     expect(getFilteredAgents(state, "running").map((agent) => agent.agentId)).toEqual([
@@ -362,6 +362,40 @@ describe("agent store", () => {
     expect(getFilteredAgents(state, "running").map((agent) => agent.agentId)).toEqual([
       "agent-2",
       "agent-3",
+      "agent-1",
+    ]);
+  });
+
+  it("prioritizes_running_agents_in_all_filter_even_without_assistant_reply", () => {
+    const seeds: AgentStoreSeed[] = [
+      {
+        agentId: "agent-1",
+        name: "Agent One",
+        sessionKey: "agent:agent-1:main",
+      },
+      {
+        agentId: "agent-2",
+        name: "Agent Two",
+        sessionKey: "agent:agent-2:main",
+      },
+    ];
+    let state = agentStoreReducer(initialAgentStoreState, {
+      type: "hydrateAgents",
+      agents: seeds,
+    });
+    state = agentStoreReducer(state, {
+      type: "updateAgent",
+      agentId: "agent-1",
+      patch: { status: "idle", lastAssistantMessageAt: 900 },
+    });
+    state = agentStoreReducer(state, {
+      type: "updateAgent",
+      agentId: "agent-2",
+      patch: { status: "running", runStartedAt: 1000, lastAssistantMessageAt: null },
+    });
+
+    expect(getFilteredAgents(state, "all").map((agent) => agent.agentId)).toEqual([
+      "agent-2",
       "agent-1",
     ]);
   });

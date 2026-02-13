@@ -1,4 +1,5 @@
 import type { AgentState, FocusFilter } from "@/features/agents/state/store";
+import { useLayoutEffect, useRef } from "react";
 import { AgentAvatar } from "./AgentAvatar";
 import { EmptyStatePanel } from "./EmptyStatePanel";
 
@@ -41,6 +42,29 @@ export const FleetSidebar = ({
   createDisabled = false,
   createBusy = false,
 }: FleetSidebarProps) => {
+  const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const previousTopByAgentIdRef = useRef<Map<string, number>>(new Map());
+
+  useLayoutEffect(() => {
+    const nextTopByAgentId = new Map<string, number>();
+    for (const agent of agents) {
+      const node = rowRefs.current.get(agent.agentId);
+      if (!node) continue;
+      const nextTop = node.getBoundingClientRect().top;
+      nextTopByAgentId.set(agent.agentId, nextTop);
+      const previousTop = previousTopByAgentIdRef.current.get(agent.agentId);
+      if (typeof previousTop !== "number") continue;
+      const deltaY = previousTop - nextTop;
+      if (Math.abs(deltaY) < 0.5) continue;
+      if (typeof node.animate !== "function") continue;
+      node.animate(
+        [{ transform: `translateY(${deltaY}px)` }, { transform: "translateY(0px)" }],
+        { duration: 300, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }
+      );
+    }
+    previousTopByAgentIdRef.current = nextTopByAgentId;
+  }, [agents]);
+
   return (
     <aside
       className="glass-panel fade-up-delay relative flex h-full w-full min-w-72 flex-col gap-3 bg-sidebar p-3 xl:max-w-[320px] xl:border-r xl:border-sidebar-border"
@@ -92,6 +116,13 @@ export const FleetSidebar = ({
               return (
                 <button
                   key={agent.agentId}
+                  ref={(node) => {
+                    if (node) {
+                      rowRefs.current.set(agent.agentId, node);
+                      return;
+                    }
+                    rowRefs.current.delete(agent.agentId);
+                  }}
                   type="button"
                   data-testid={`fleet-agent-row-${agent.agentId}`}
                   className={`group flex w-full items-center gap-3 rounded-md border px-3 py-2 text-left transition ${

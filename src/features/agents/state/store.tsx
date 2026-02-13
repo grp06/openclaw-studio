@@ -454,24 +454,38 @@ export const getSelectedAgent = (state: AgentStoreState): AgentState | null => {
 };
 
 export const getFilteredAgents = (state: AgentStoreState, filter: FocusFilter): AgentState[] => {
-  const byMostRecentAssistant = (agents: AgentState[]) =>
-    [...agents].sort((a, b) => {
-      const aTs = a.lastAssistantMessageAt ?? 0;
-      const bTs = b.lastAssistantMessageAt ?? 0;
-      if (aTs !== bTs) return bTs - aTs;
-      return 0;
-    });
+  const statusPriority: Record<AgentStatus, number> = {
+    running: 0,
+    idle: 1,
+    error: 2,
+  };
+  const getActivityTimestamp = (agent: AgentState) =>
+    Math.max(agent.lastActivityAt ?? 0, agent.runStartedAt ?? 0, agent.lastAssistantMessageAt ?? 0);
+  const sortAgents = (agents: AgentState[], prioritizeStatus: boolean) =>
+    agents
+      .map((agent, index) => ({ agent, index }))
+      .sort((left, right) => {
+        if (prioritizeStatus) {
+          const statusDelta =
+            statusPriority[left.agent.status] - statusPriority[right.agent.status];
+          if (statusDelta !== 0) return statusDelta;
+        }
+        const timeDelta = getActivityTimestamp(right.agent) - getActivityTimestamp(left.agent);
+        if (timeDelta !== 0) return timeDelta;
+        return left.index - right.index;
+      })
+      .map(({ agent }) => agent);
   switch (filter) {
     case "all":
-      return byMostRecentAssistant(state.agents);
+      return sortAgents(state.agents, true);
     case "running":
-      return byMostRecentAssistant(state.agents.filter((agent) => agent.status === "running"));
+      return sortAgents(state.agents.filter((agent) => agent.status === "running"), false);
     case "idle":
-      return byMostRecentAssistant(state.agents.filter((agent) => agent.status === "idle"));
+      return sortAgents(state.agents.filter((agent) => agent.status === "idle"), false);
     default: {
       const _exhaustive: never = filter;
       void _exhaustive;
-      return byMostRecentAssistant(state.agents);
+      return sortAgents(state.agents, true);
     }
   }
 };
