@@ -463,10 +463,7 @@ export const AgentSettingsPanel = ({
           className="border-t border-border/60 py-4 first:border-t-0"
           data-testid="agent-settings-identity"
         >
-          <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Identity
-          </div>
-          <label className="mt-3 flex flex-col gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          <label className="flex flex-col gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             <span>Agent name</span>
             <input
               aria-label="Agent name"
@@ -492,37 +489,6 @@ export const AgentSettingsPanel = ({
             >
               {renameSaving ? "Saving..." : "Update Name"}
             </button>
-          </div>
-        </section>
-
-        <section
-          className="border-t border-border/60 py-4 first:border-t-0"
-          data-testid="agent-settings-display"
-        >
-          <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Display
-          </div>
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <label className="flex items-center justify-between gap-3 rounded-md border border-border/80 bg-surface-3 px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-              <span>Show tool calls</span>
-              <input
-                aria-label="Show tool calls"
-                type="checkbox"
-                className="h-4 w-4 rounded border-input text-foreground"
-                checked={agent.toolCallingEnabled}
-                onChange={(event) => onToolCallingToggle(event.target.checked)}
-              />
-            </label>
-            <label className="flex items-center justify-between gap-3 rounded-md border border-border/80 bg-surface-3 px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-              <span>Show thinking</span>
-              <input
-                aria-label="Show thinking"
-                type="checkbox"
-                className="h-4 w-4 rounded border-input text-foreground"
-                checked={agent.showThinkingTraces}
-                onChange={(event) => onThinkingTracesToggle(event.target.checked)}
-              />
-            </label>
           </div>
         </section>
 
@@ -604,7 +570,7 @@ export const AgentSettingsPanel = ({
             Session
           </div>
           <div className="mt-3 text-[11px] text-muted-foreground">
-            Start this agent in a fresh session and clear the visible transcript in Studio.
+            Starts a new session and clears the visible transcript in Studio.
           </div>
           <button
             className="mt-3 w-full rounded-md border border-border/80 bg-surface-3 px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground transition hover:border-border hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-70"
@@ -836,6 +802,37 @@ export const AgentSettingsPanel = ({
               })}
             </div>
           ) : null}
+        </section>
+
+        <section
+          className="border-t border-border/60 py-4 first:border-t-0"
+          data-testid="agent-settings-display"
+        >
+          <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            Display
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="flex items-center justify-between gap-3 rounded-md border border-border/80 bg-surface-3 px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              <span>Show tool calls</span>
+              <input
+                aria-label="Show tool calls"
+                type="checkbox"
+                className="h-4 w-4 rounded border-input text-foreground"
+                checked={agent.toolCallingEnabled}
+                onChange={(event) => onToolCallingToggle(event.target.checked)}
+              />
+            </label>
+            <label className="flex items-center justify-between gap-3 rounded-md border border-border/80 bg-surface-3 px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              <span>Show thinking</span>
+              <input
+                aria-label="Show thinking"
+                type="checkbox"
+                className="h-4 w-4 rounded border-input text-foreground"
+                checked={agent.showThinkingTraces}
+                onChange={(event) => onThinkingTracesToggle(event.target.checked)}
+              />
+            </label>
+          </div>
         </section>
 
         {canDelete ? (
