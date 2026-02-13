@@ -63,7 +63,7 @@ describe("gateway runtime event handler (chat)", () => {
       clearPendingLivePatch: vi.fn(),
       now: () => 1000,
       loadSummarySnapshot: vi.fn(async () => {}),
-      loadAgentHistory: vi.fn(async () => {}),
+      requestHistoryRefresh: vi.fn(async () => {}),
       refreshHeartbeatLatestUpdate: vi.fn(),
       bumpHeartbeatTick: vi.fn(),
       setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
@@ -109,7 +109,7 @@ describe("gateway runtime event handler (chat)", () => {
       clearPendingLivePatch: vi.fn(),
       now: () => 1000,
       loadSummarySnapshot: vi.fn(async () => {}),
-      loadAgentHistory: vi.fn(async () => {}),
+      requestHistoryRefresh: vi.fn(async () => {}),
       refreshHeartbeatLatestUpdate: vi.fn(),
       bumpHeartbeatTick: vi.fn(),
       setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
@@ -150,7 +150,7 @@ describe("gateway runtime event handler (chat)", () => {
       clearPendingLivePatch: vi.fn(),
       now: () => 1000,
       loadSummarySnapshot: vi.fn(async () => {}),
-      loadAgentHistory: vi.fn(async () => {}),
+      requestHistoryRefresh: vi.fn(async () => {}),
       refreshHeartbeatLatestUpdate: vi.fn(),
       bumpHeartbeatTick: vi.fn(),
       setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
@@ -199,7 +199,7 @@ describe("gateway runtime event handler (chat)", () => {
       clearPendingLivePatch,
       now: () => 1000,
       loadSummarySnapshot: vi.fn(async () => {}),
-      loadAgentHistory: vi.fn(async () => {}),
+      requestHistoryRefresh: vi.fn(async () => {}),
       refreshHeartbeatLatestUpdate: vi.fn(),
       bumpHeartbeatTick: vi.fn(),
       setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
@@ -251,9 +251,9 @@ describe("gateway runtime event handler (chat)", () => {
     expect(clearPendingLivePatch).toHaveBeenCalledWith("agent-1");
   });
 
-  it("requests agent history load when final assistant has no thinking trace and no prior trace output", () => {
+  it("requests history refresh through boundary command only when final assistant arrives without trace lines", () => {
     const agents = [createAgent({ outputLines: [] })];
-    const loadAgentHistory = vi.fn(async () => {});
+    const requestHistoryRefresh = vi.fn(async () => {});
     const handler = createGatewayRuntimeEventHandler({
       getStatus: () => "connected",
       getAgents: () => agents,
@@ -262,7 +262,7 @@ describe("gateway runtime event handler (chat)", () => {
       clearPendingLivePatch: vi.fn(),
       now: () => 1000,
       loadSummarySnapshot: vi.fn(async () => {}),
-      loadAgentHistory,
+      requestHistoryRefresh,
       refreshHeartbeatLatestUpdate: vi.fn(),
       bumpHeartbeatTick: vi.fn(),
       setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
@@ -283,8 +283,11 @@ describe("gateway runtime event handler (chat)", () => {
       },
     });
 
-    expect(loadAgentHistory).toHaveBeenCalledTimes(1);
-    expect(loadAgentHistory).toHaveBeenCalledWith("agent-1");
+    expect(requestHistoryRefresh).toHaveBeenCalledTimes(1);
+    expect(requestHistoryRefresh).toHaveBeenCalledWith({
+      agentId: "agent-1",
+      reason: "chat-final-no-trace",
+    });
   });
 
   it("ignores_replayed_terminal_chat_events_for_same_run", () => {
@@ -301,7 +304,7 @@ describe("gateway runtime event handler (chat)", () => {
       clearPendingLivePatch: vi.fn(),
       now: () => 1000,
       loadSummarySnapshot: vi.fn(async () => {}),
-      loadAgentHistory: vi.fn(async () => {}),
+      requestHistoryRefresh: vi.fn(async () => {}),
       refreshHeartbeatLatestUpdate: vi.fn(),
       bumpHeartbeatTick: vi.fn(),
       setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
@@ -347,6 +350,7 @@ describe("gateway runtime event handler (chat)", () => {
         dispatched.push(action as never);
       }
     });
+    const requestHistoryRefresh = vi.fn(async () => {});
     const handler = createGatewayRuntimeEventHandler({
       getStatus: () => "connected",
       getAgents: () => agents,
@@ -355,7 +359,7 @@ describe("gateway runtime event handler (chat)", () => {
       clearPendingLivePatch: vi.fn(),
       now: () => 1000,
       loadSummarySnapshot: vi.fn(async () => {}),
-      loadAgentHistory: vi.fn(async () => {}),
+      requestHistoryRefresh,
       refreshHeartbeatLatestUpdate: vi.fn(),
       bumpHeartbeatTick: vi.fn(),
       setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
@@ -382,6 +386,7 @@ describe("gateway runtime event handler (chat)", () => {
       return patch.streamText === null || patch.thinkingTrace === null || patch.runStartedAt === null;
     });
     expect(terminalClears.length).toBe(0);
+    expect(requestHistoryRefresh).not.toHaveBeenCalled();
   });
 
   it("handles aborted/error by appending output and clearing stream fields", () => {
@@ -395,7 +400,7 @@ describe("gateway runtime event handler (chat)", () => {
       clearPendingLivePatch: vi.fn(),
       now: () => 1000,
       loadSummarySnapshot: vi.fn(async () => {}),
-      loadAgentHistory: vi.fn(async () => {}),
+      requestHistoryRefresh: vi.fn(async () => {}),
       refreshHeartbeatLatestUpdate: vi.fn(),
       bumpHeartbeatTick: vi.fn(),
       setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
@@ -436,7 +441,7 @@ describe("gateway runtime event handler (chat)", () => {
       clearPendingLivePatch: vi.fn(),
       now: () => 1000,
       loadSummarySnapshot: vi.fn(async () => {}),
-      loadAgentHistory: vi.fn(async () => {}),
+      requestHistoryRefresh: vi.fn(async () => {}),
       refreshHeartbeatLatestUpdate: vi.fn(),
       bumpHeartbeatTick: vi.fn(),
       setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
@@ -481,7 +486,7 @@ describe("gateway runtime event handler (chat)", () => {
       clearPendingLivePatch: vi.fn(),
       now: () => 1000,
       loadSummarySnapshot: vi.fn(async () => {}),
-      loadAgentHistory: vi.fn(async () => {}),
+      requestHistoryRefresh: vi.fn(async () => {}),
       refreshHeartbeatLatestUpdate: vi.fn(),
       bumpHeartbeatTick: vi.fn(),
       setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,

@@ -44,7 +44,10 @@ export type GatewayRuntimeEventHandlerDeps = {
   now?: () => number;
 
   loadSummarySnapshot: () => Promise<void>;
-  loadAgentHistory: (agentId: string, options?: { limit?: number }) => Promise<void>;
+  requestHistoryRefresh: (command: {
+    agentId: string;
+    reason: "chat-final-no-trace";
+  }) => Promise<void> | void;
   refreshHeartbeatLatestUpdate: () => void;
   bumpHeartbeatTick: () => void;
 
@@ -449,7 +452,10 @@ export function createGatewayRuntimeEventHandler(
         agent &&
         !agent.outputLines.some((line) => isTraceMarkdown(line.trim()))
       ) {
-        void deps.loadAgentHistory(agentId);
+        void deps.requestHistoryRefresh({
+          agentId,
+          reason: "chat-final-no-trace",
+        });
       }
       if (!isToolRole && typeof nextText === "string") {
         dispatchOutput(agentId, nextText, {
