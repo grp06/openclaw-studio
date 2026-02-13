@@ -16,8 +16,35 @@ const buildMatchMedia = (matches: boolean) =>
     dispatchEvent: vi.fn(),
   }));
 
+const createLocalStorageMock = () => {
+  let store: Record<string, string> = {};
+
+  return {
+    getItem: (key: string) => (key in store ? store[key] : null),
+    setItem: (key: string, value: string) => {
+      store[key] = String(value);
+    },
+    removeItem: (key: string) => {
+      delete store[key];
+    },
+    clear: () => {
+      store = {};
+    },
+    key: (index: number) => Object.keys(store)[index] ?? null,
+    get length() {
+      return Object.keys(store).length;
+    },
+  };
+};
+
 describe("ThemeToggle", () => {
   beforeEach(() => {
+    // Some JS DOM shims expose a partial localStorage; tests need a full Storage-like API.
+    Object.defineProperty(window, "localStorage", {
+      value: createLocalStorageMock(),
+      configurable: true,
+    });
+
     document.documentElement.classList.remove("dark");
     window.localStorage.clear();
     vi.stubGlobal("matchMedia", buildMatchMedia(false));
