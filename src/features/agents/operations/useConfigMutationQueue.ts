@@ -4,7 +4,11 @@ import { shouldStartNextConfigMutation } from "@/features/agents/operations/conf
 import type { GatewayStatus } from "@/features/agents/operations/gatewayRestartPolicy";
 import { randomUUID } from "@/lib/uuid";
 
-export type ConfigMutationKind = "create-agent" | "rename-agent" | "delete-agent";
+export type ConfigMutationKind =
+  | "create-agent"
+  | "rename-agent"
+  | "delete-agent"
+  | "update-agent-execution-role";
 
 type QueuedConfigMutation = {
   id: string;

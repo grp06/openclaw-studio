@@ -138,3 +138,41 @@ export async function upsertGatewayAgentExecApprovals(params: {
     exists: snapshot.exists,
   });
 }
+
+export async function readGatewayAgentExecApprovals(params: {
+  client: GatewayClient;
+  agentId: string;
+}): Promise<{
+  security: GatewayExecApprovalSecurity | null;
+  ask: GatewayExecApprovalAsk | null;
+  allowlist: Array<{ pattern: string }>;
+} | null> {
+  const agentId = params.agentId.trim();
+  if (!agentId) {
+    throw new Error("Agent id is required.");
+  }
+
+  const snapshot = await params.client.call<ExecApprovalsSnapshot>("exec.approvals.get", {});
+  const entry = snapshot.file?.agents?.[agentId];
+  if (!entry) return null;
+
+  const security =
+    entry.security === "deny" || entry.security === "allowlist" || entry.security === "full"
+      ? entry.security
+      : null;
+  const ask = entry.ask === "off" || entry.ask === "on-miss" || entry.ask === "always" ? entry.ask : null;
+  const allowlist = Array.isArray(entry.allowlist)
+    ? entry.allowlist
+        .map((item) => (item && typeof item === "object" ? (item as ExecAllowlistEntry).pattern : ""))
+        .filter((pattern): pattern is string => typeof pattern === "string")
+        .map((pattern) => pattern.trim())
+        .filter((pattern) => pattern.length > 0)
+        .map((pattern) => ({ pattern }))
+    : [];
+
+  return {
+    security,
+    ask,
+    allowlist,
+  };
+}

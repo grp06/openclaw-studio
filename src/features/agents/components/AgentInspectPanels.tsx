@@ -58,6 +58,7 @@ type AgentSettingsPanelProps = {
   agent: AgentState;
   onClose: () => void;
   onRename: (value: string) => Promise<boolean>;
+  onUpdateExecutionRole?: (role: "conservative" | "collaborative" | "autonomous") => Promise<void> | void;
   onNewSession: () => Promise<void> | void;
   onDelete: () => void;
   canDelete?: boolean;
@@ -248,6 +249,7 @@ export const AgentSettingsPanel = ({
   agent,
   onClose,
   onRename,
+  onUpdateExecutionRole = () => {},
   onNewSession,
   onDelete,
   canDelete = true,
@@ -274,6 +276,11 @@ export const AgentSettingsPanel = ({
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
   const [sessionBusy, setSessionBusy] = useState(false);
+  const [executionRoleDraft, setExecutionRoleDraft] = useState<
+    "conservative" | "collaborative" | "autonomous"
+  >("collaborative");
+  const [executionRoleSaving, setExecutionRoleSaving] = useState(false);
+  const [executionRoleError, setExecutionRoleError] = useState<string | null>(null);
   const [expandedCronJobIds, setExpandedCronJobIds] = useState<Set<string>>(() => new Set());
   const [cronCreateOpen, setCronCreateOpen] = useState(false);
   const [cronCreateStep, setCronCreateStep] = useState(0);
@@ -284,6 +291,22 @@ export const AgentSettingsPanel = ({
     setNameDraft(agent.name);
     setRenameError(null);
   }, [agent.agentId, agent.name]);
+
+  const resolvedExecutionRole: "conservative" | "collaborative" | "autonomous" = useMemo(() => {
+    if (agent.sessionExecSecurity === "full" && agent.sessionExecAsk === "off") {
+      return "autonomous";
+    }
+    if (agent.sessionExecSecurity === "allowlist" || agent.sessionExecAsk === "always" || agent.sessionExecAsk === "on-miss") {
+      return "collaborative";
+    }
+    return "conservative";
+  }, [agent.sessionExecAsk, agent.sessionExecSecurity]);
+
+  useEffect(() => {
+    setExecutionRoleDraft(resolvedExecutionRole);
+    setExecutionRoleError(null);
+    setExecutionRoleSaving(false);
+  }, [agent.agentId, resolvedExecutionRole]);
 
   const handleRename = async () => {
     const next = nameDraft.trim();
@@ -315,6 +338,24 @@ export const AgentSettingsPanel = ({
       await onNewSession();
     } finally {
       setSessionBusy(false);
+    }
+  };
+
+  const handleUpdateExecutionRole = async () => {
+    if (executionRoleSaving) return;
+    if (executionRoleDraft === resolvedExecutionRole) {
+      setExecutionRoleError(null);
+      return;
+    }
+    setExecutionRoleSaving(true);
+    setExecutionRoleError(null);
+    try {
+      await onUpdateExecutionRole(executionRoleDraft);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update execution role.";
+      setExecutionRoleError(message);
+    } finally {
+      setExecutionRoleSaving(false);
     }
   };
 
@@ -482,6 +523,76 @@ export const AgentSettingsPanel = ({
                 onChange={(event) => onThinkingTracesToggle(event.target.checked)}
               />
             </label>
+          </div>
+        </section>
+
+        <section
+          className="border-t border-border/60 py-4 first:border-t-0"
+          data-testid="agent-settings-execution"
+        >
+          <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            Execution role
+          </div>
+          <div className="mt-3 text-[11px] text-muted-foreground">
+            Controls whether this agent can run commands without approval prompts.
+          </div>
+          <div className="mt-3 grid gap-2">
+            {(
+              [
+                {
+                  id: "conservative" as const,
+                  title: "Conservative",
+                  description: "No command execution.",
+                },
+                {
+                  id: "collaborative" as const,
+                  title: "Collaborative",
+                  description: "Commands require approval.",
+                },
+                {
+                  id: "autonomous" as const,
+                  title: "Autonomous",
+                  description: "Commands run automatically.",
+                },
+              ] as const
+            ).map((option) => {
+              const selected = executionRoleDraft === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`rounded-md border px-3 py-2 text-left transition ${
+                    selected
+                      ? "border-primary/60 bg-primary/10"
+                      : "border-border/80 bg-surface-3 hover:border-border hover:bg-surface-2"
+                  }`}
+                  disabled={executionRoleSaving}
+                  onClick={() => setExecutionRoleDraft(option.id)}
+                >
+                  <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground">
+                    {option.title}
+                  </div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">{option.description}</div>
+                </button>
+              );
+            })}
+          </div>
+          {executionRoleError ? (
+            <div className="mt-3 rounded-md border border-destructive bg-destructive px-3 py-2 text-xs text-destructive-foreground">
+              {executionRoleError}
+            </div>
+          ) : null}
+          <div className="mt-3 flex justify-end">
+            <button
+              className="rounded-md border border-transparent bg-primary px-4 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-foreground transition hover:brightness-105 disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
+              type="button"
+              onClick={() => {
+                void handleUpdateExecutionRole();
+              }}
+              disabled={executionRoleSaving || executionRoleDraft === resolvedExecutionRole}
+            >
+              {executionRoleSaving ? "Saving..." : "Update Role"}
+            </button>
           </div>
         </section>
 

@@ -55,10 +55,13 @@ import {
   renameGatewayAgent,
   removeGatewayHeartbeatOverride,
   listHeartbeatsForAgent,
+  readConfigAgentList,
   slugifyAgentName,
   triggerHeartbeatNow,
+  updateGatewayAgentOverrides,
   type AgentHeartbeatSummary,
 } from "@/lib/gateway/agentConfig";
+import { readGatewayAgentExecApprovals, upsertGatewayAgentExecApprovals } from "@/lib/gateway/execApprovals";
 import { buildAvatarDataUrl } from "@/lib/avatars/multiavatar";
 import { createStudioSettingsCoordinator } from "@/lib/studio/coordinator";
 import { resolveFocusedPreference } from "@/lib/studio/settings";
@@ -2270,6 +2273,119 @@ const AgentStudioPage = () => {
     ]
   );
 
+  type ExecutionRoleId = "conservative" | "collaborative" | "autonomous";
+
+  const handleUpdateExecutionRole = useCallback(
+    async (agentId: string, role: ExecutionRoleId) => {
+      const guard = resolveMutationStartGuard({
+        status: "connected",
+        hasCreateBlock: Boolean(createAgentBlock),
+        hasRenameBlock: Boolean(renameAgentBlock),
+        hasDeleteBlock: Boolean(deleteAgentBlock),
+      });
+      if (guard.kind === "deny") return;
+
+      const resolvedAgentId = agentId.trim();
+      if (!resolvedAgentId) return;
+      const agent = agents.find((entry) => entry.agentId === resolvedAgentId) ?? null;
+      if (!agent) return;
+
+      await enqueueConfigMutation({
+        kind: "update-agent-execution-role",
+        label: `Update execution role for ${agent.name}`,
+        run: async () => {
+          const existingPolicy = await readGatewayAgentExecApprovals({
+            client,
+            agentId: resolvedAgentId,
+          });
+          const allowlist = existingPolicy?.allowlist ?? [];
+          const nextPolicy =
+            role === "conservative"
+              ? null
+              : role === "autonomous"
+                ? {
+                    security: "full" as const,
+                    ask: "off" as const,
+                    allowlist,
+                  }
+                : {
+                    security: "allowlist" as const,
+                    ask: "always" as const,
+                    allowlist,
+                  };
+
+          await upsertGatewayAgentExecApprovals({
+            client,
+            agentId: resolvedAgentId,
+            policy: nextPolicy,
+          });
+
+          const snapshot = await client.call<{ config?: unknown }>("config.get", {});
+          const baseConfig =
+            snapshot.config && typeof snapshot.config === "object" && !Array.isArray(snapshot.config)
+              ? (snapshot.config as Record<string, unknown>)
+              : undefined;
+          const list = readConfigAgentList(baseConfig);
+          const configEntry = list.find((entry) => entry.id === resolvedAgentId) ?? null;
+
+          const toolsRaw =
+            configEntry && typeof (configEntry as Record<string, unknown>).tools === "object"
+              ? ((configEntry as Record<string, unknown>).tools as unknown)
+              : null;
+          const tools =
+            toolsRaw && typeof toolsRaw === "object" && !Array.isArray(toolsRaw)
+              ? (toolsRaw as Record<string, unknown>)
+              : null;
+          const coerceStringArray = (value: unknown): string[] | null => {
+            if (!Array.isArray(value)) return null;
+            return value
+              .filter((item): item is string => typeof item === "string")
+              .map((item) => item.trim())
+              .filter((item) => item.length > 0);
+          };
+
+          const existingAllow = coerceStringArray(tools?.allow);
+          const existingAlsoAllow = coerceStringArray(tools?.alsoAllow);
+          const existingDeny = coerceStringArray(tools?.deny) ?? [];
+
+          const usesAllow = existingAllow !== null;
+          const baseAllowed = new Set(usesAllow ? existingAllow : existingAlsoAllow ?? []);
+          const deny = new Set(existingDeny);
+
+          if (role === "conservative") {
+            baseAllowed.delete("group:runtime");
+            deny.add("group:runtime");
+          } else {
+            baseAllowed.add("group:runtime");
+            deny.delete("group:runtime");
+          }
+
+          const allowedList = Array.from(baseAllowed);
+          const denyList = Array.from(deny).filter((entry) => !baseAllowed.has(entry));
+
+          await updateGatewayAgentOverrides({
+            client,
+            agentId: resolvedAgentId,
+            overrides: {
+              tools: usesAllow ? { allow: allowedList, deny: denyList } : { alsoAllow: allowedList, deny: denyList },
+            },
+          });
+
+          await loadAgents();
+        },
+      });
+    },
+    [
+      agents,
+      client,
+      createAgentBlock,
+      deleteAgentBlock,
+      enqueueConfigMutation,
+      loadAgents,
+      renameAgentBlock,
+    ]
+  );
+
   const handleAvatarShuffle = useCallback(
     async (agentId: string) => {
       const avatarSeed = randomUUID();
@@ -2657,6 +2773,9 @@ const AgentStudioPage = () => {
                   setMobilePane("chat");
                 }}
                 onRename={(name) => handleRenameAgent(settingsAgent.agentId, name)}
+                onUpdateExecutionRole={(role) =>
+                  handleUpdateExecutionRole(settingsAgent.agentId, role)
+                }
                 onNewSession={() => handleNewSession(settingsAgent.agentId)}
                 onDelete={() => handleDeleteAgent(settingsAgent.agentId)}
                 canDelete={settingsAgent.agentId !== RESERVED_MAIN_AGENT_ID}

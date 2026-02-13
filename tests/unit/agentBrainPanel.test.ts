@@ -95,7 +95,7 @@ describe("AgentBrainPanel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders_guided_personality_fields_instead_of_file_tabs", async () => {
+  it("renders_file_tabs_and_loads_agent_files", async () => {
     const { client } = createMockClient();
     const agents = [
       createAgent("agent-1", "Alpha", "session-1"),
@@ -112,12 +112,14 @@ describe("AgentBrainPanel", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Identity name")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "AGENTS" })).toBeInTheDocument();
     });
 
-    expect(screen.queryByRole("button", { name: "AGENTS" })).not.toBeInTheDocument();
-    expect(screen.getByDisplayValue("Alpha")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("GP")).toBeInTheDocument();
+    expect(screen.getByText("alpha agents")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "IDENTITY" }));
+    await waitFor(() => {
+      expect(screen.getByText("Name: Alpha")).toBeInTheDocument();
+    });
   });
 
   it("shows_actionable_message_when_session_key_missing", async () => {
@@ -152,8 +154,18 @@ describe("AgentBrainPanel", () => {
       })
     );
 
-    const input = await screen.findByLabelText("Identity name");
-    fireEvent.change(input, { target: { value: "Alpha Prime" } });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "IDENTITY" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "IDENTITY" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const textarea = await screen.findByRole("textbox");
+    fireEvent.change(textarea, {
+      target: {
+        value:
+          "# IDENTITY.md - Who Am I?\n\n- Name: Alpha Prime\n- Creature: droid\n- Vibe: calm\n- Emoji: 🤖\n",
+      },
+    });
     fireEvent.click(screen.getByTestId("agent-brain-close"));
 
     await waitFor(() => {
