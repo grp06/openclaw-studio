@@ -252,42 +252,49 @@ describe("gateway runtime event handler (chat)", () => {
   });
 
   it("requests history refresh through boundary command only when final assistant arrives without trace lines", () => {
-    const agents = [createAgent({ outputLines: [] })];
-    const requestHistoryRefresh = vi.fn(async () => {});
-    const handler = createGatewayRuntimeEventHandler({
-      getStatus: () => "connected",
-      getAgents: () => agents,
-      dispatch: vi.fn(),
-      queueLivePatch: vi.fn(),
-      clearPendingLivePatch: vi.fn(),
-      now: () => 1000,
-      loadSummarySnapshot: vi.fn(async () => {}),
-      requestHistoryRefresh,
-      refreshHeartbeatLatestUpdate: vi.fn(),
-      bumpHeartbeatTick: vi.fn(),
-      setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
-      clearTimeout: (id) => clearTimeout(id as unknown as NodeJS.Timeout),
-      isDisconnectLikeError: () => false,
-      logWarn: vi.fn(),
-      updateSpecialLatestUpdate: vi.fn(),
-    });
+    vi.useFakeTimers();
+    try {
+      const agents = [createAgent({ outputLines: [] })];
+      const requestHistoryRefresh = vi.fn(async () => {});
+      const handler = createGatewayRuntimeEventHandler({
+        getStatus: () => "connected",
+        getAgents: () => agents,
+        dispatch: vi.fn(),
+        queueLivePatch: vi.fn(),
+        clearPendingLivePatch: vi.fn(),
+        now: () => 1000,
+        loadSummarySnapshot: vi.fn(async () => {}),
+        requestHistoryRefresh,
+        refreshHeartbeatLatestUpdate: vi.fn(),
+        bumpHeartbeatTick: vi.fn(),
+        setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
+        clearTimeout: (id) => clearTimeout(id as unknown as NodeJS.Timeout),
+        isDisconnectLikeError: () => false,
+        logWarn: vi.fn(),
+        updateSpecialLatestUpdate: vi.fn(),
+      });
 
-    handler.handleEvent({
-      type: "event",
-      event: "chat",
-      payload: {
-        runId: "run-1",
-        sessionKey: agents[0]!.sessionKey,
-        state: "final",
-        message: { role: "assistant", content: "Done" },
-      },
-    });
+      handler.handleEvent({
+        type: "event",
+        event: "chat",
+        payload: {
+          runId: "run-1",
+          sessionKey: agents[0]!.sessionKey,
+          state: "final",
+          message: { role: "assistant", content: "Done" },
+        },
+      });
 
-    expect(requestHistoryRefresh).toHaveBeenCalledTimes(1);
-    expect(requestHistoryRefresh).toHaveBeenCalledWith({
-      agentId: "agent-1",
-      reason: "chat-final-no-trace",
-    });
+      expect(requestHistoryRefresh).not.toHaveBeenCalled();
+      vi.runAllTimers();
+      expect(requestHistoryRefresh).toHaveBeenCalledTimes(1);
+      expect(requestHistoryRefresh).toHaveBeenCalledWith({
+        agentId: "agent-1",
+        reason: "chat-final-no-trace",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("ignores_replayed_terminal_chat_events_for_same_run", () => {

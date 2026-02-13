@@ -277,6 +277,10 @@ export function createGatewayRuntimeEventHandler(
     intents: RuntimePolicyIntent[],
     options?: { agentForLatestUpdate?: AgentState | undefined }
   ) => {
+    const deferredHistoryRefreshes: Array<{
+      agentId: string;
+      reason: "chat-final-no-trace";
+    }> = [];
     for (const intent of intents) {
       if (intent.kind === "ignore") {
         continue;
@@ -316,7 +320,7 @@ export function createGatewayRuntimeEventHandler(
         continue;
       }
       if (intent.kind === "requestHistoryRefresh") {
-        void deps.requestHistoryRefresh({
+        deferredHistoryRefreshes.push({
           agentId: intent.agentId,
           reason: intent.reason,
         });
@@ -345,6 +349,14 @@ export function createGatewayRuntimeEventHandler(
           void deps.loadSummarySnapshot();
         }, intent.delayMs);
       }
+    }
+    for (const refresh of deferredHistoryRefreshes) {
+      deps.setTimeout(() => {
+        void deps.requestHistoryRefresh({
+          agentId: refresh.agentId,
+          reason: refresh.reason,
+        });
+      }, 0);
     }
   };
 
