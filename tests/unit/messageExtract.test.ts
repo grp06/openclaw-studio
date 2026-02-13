@@ -87,8 +87,7 @@ describe("message-extract", () => {
     });
 
     expect(isUiMetadataPrefix(built)).toBe(false);
-    expect(stripUiMetadata(built)).toContain("hello");
-    expect(stripUiMetadata(built)).toContain("Execution approval policy:");
+    expect(stripUiMetadata(built)).toBe("hello");
   });
 
   it("strips leading system event blocks from queued session updates", () => {

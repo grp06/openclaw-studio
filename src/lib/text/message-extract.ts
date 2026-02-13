@@ -41,6 +41,12 @@ const EXEC_APPROVAL_WAIT_POLICY = [
   'If approved command output is unavailable, reply exactly: "Waiting for approved command result."',
 ].join("\n");
 
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const EXEC_APPROVAL_WAIT_POLICY_SUFFIX_RE = new RegExp(
+  `(?:\\r?\\n){2}${escapeRegExp(EXEC_APPROVAL_WAIT_POLICY).replace(/\n/g, "\\r?\\n")}\\s*$`
+);
+
 type ToolCallRecord = {
   id?: string;
   name?: string;
@@ -515,6 +521,7 @@ export const stripUiMetadata = (text: string) => {
     cleaned = cleaned.replace(PROJECT_PROMPT_BLOCK_RE, "");
   }
   cleaned = cleaned.replace(MESSAGE_ID_RE, "").trim();
+  cleaned = cleaned.replace(EXEC_APPROVAL_WAIT_POLICY_SUFFIX_RE, "").trim();
   return cleaned;
 };
 
