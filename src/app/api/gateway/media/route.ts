@@ -23,7 +23,7 @@ const MIME_BY_EXT: Record<string, string> = {
   ".webp": "image/webp",
 };
 
-const expandTilde = (value: string): string => {
+const expandTildeLocal = (value: string): string => {
   const trimmed = value.trim();
   if (trimmed === "~") return os.homedir();
   if (trimmed.startsWith("~/")) return path.join(os.homedir(), trimmed.slice(2));
@@ -34,29 +34,53 @@ const validateRawMediaPath = (raw: string): { trimmed: string; mime: string } =>
   const trimmed = raw.trim();
   if (!trimmed) throw new Error("path is required");
   if (trimmed.length > 4096) throw new Error("path too long");
-  if (/[\0\r\n]/.test(trimmed)) throw new Error("path contains invalid characters");
+  if (/[^\S\r\n]*[\0\r\n]/.test(trimmed)) throw new Error("path contains invalid characters");
 
   const ext = path.extname(trimmed).toLowerCase();
   const mime = MIME_BY_EXT[ext];
   if (!mime) throw new Error(`Unsupported media extension: ${ext || "(none)"}`);
+
   return { trimmed, mime };
 };
 
-const resolveAndValidateLocalMediaPath = (raw: string): { resolved: string; mime: string; rawTrimmed: string } => {
+const resolveAndValidateLocalMediaPath = (raw: string): { resolved: string; mime: string } => {
   const { trimmed, mime } = validateRawMediaPath(raw);
-  const expanded = expandTilde(trimmed);
+
+  const expanded = expandTildeLocal(trimmed);
   if (!path.isAbsolute(expanded)) {
     throw new Error("path must be absolute or start with ~/");
   }
 
   const resolved = path.resolve(expanded);
+
   const allowedRoot = path.join(os.homedir(), ".openclaw");
   const allowedPrefix = `${allowedRoot}${path.sep}`;
   if (!(resolved === allowedRoot || resolved.startsWith(allowedPrefix))) {
     throw new Error(`Refusing to read media outside ${allowedRoot}`);
   }
 
-  return { resolved, mime, rawTrimmed: trimmed };
+  return { resolved, mime };
+};
+
+const validateRemoteMediaPath = (raw: string): { remotePath: string; mime: string } => {
+  const { trimmed, mime } = validateRawMediaPath(raw);
+
+  if (!(trimmed.startsWith("/") || trimmed === "~" || trimmed.startsWith("~/"))) {
+    throw new Error("path must be absolute or start with ~/");
+  }
+
+  // Remote side enforces ~/.openclaw; this guard lets Studio on macOS request
+  // /home/ubuntu/.openclaw/... without tripping local homedir checks.
+  const normalized = trimmed.replaceAll("\\\\", "/");
+  const inOpenclaw =
+    normalized === "~/.openclaw" ||
+    normalized.startsWith("~/.openclaw/") ||
+    normalized.includes("/.openclaw/");
+  if (!inOpenclaw) {
+    throw new Error("Refusing to read remote media outside ~/.openclaw");
+  }
+
+  return { remotePath: trimmed, mime };
 };
 
 const readLocalMedia = async (resolvedPath: string): Promise<{ bytes: Buffer; size: number }> => {
@@ -137,7 +161,9 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const rawPath = (searchParams.get("path") ?? "").trim();
+
     const sshTarget = resolveSshTarget();
+
     if (!sshTarget) {
       const { resolved, mime } = resolveAndValidateLocalMediaPath(rawPath);
       const { bytes, size } = await readLocalMedia(resolved);
@@ -151,7 +177,8 @@ export async function GET(request: Request) {
       });
     }
 
-    const { trimmed: remotePath, mime } = validateRawMediaPath(rawPath);
+    const { remotePath, mime } = validateRemoteMediaPath(rawPath);
+
     const result = childProcess.spawnSync(
       "ssh",
       ["-o", "BatchMode=yes", sshTarget, "bash", "-s", "--", remotePath],
@@ -187,6 +214,7 @@ export async function GET(request: Request) {
     const buf = Buffer.from(b64, "base64");
     const responseMime = payload.mime || mime;
     const body = new Blob([Uint8Array.from(buf)], { type: responseMime });
+
     return new Response(body, {
       headers: {
         "Content-Type": responseMime,

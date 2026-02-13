@@ -195,11 +195,12 @@ const hasNumericTimestamp = (value: number | null): value is number => {
 };
 
 const compareEntries = (a: TranscriptEntry, b: TranscriptEntry): number => {
-  const aHasTs = hasNumericTimestamp(a.timestampMs);
-  const bHasTs = hasNumericTimestamp(b.timestampMs);
+  const aTimestamp = a.timestampMs;
+  const bTimestamp = b.timestampMs;
+  const aHasTs = hasNumericTimestamp(aTimestamp);
+  const bHasTs = hasNumericTimestamp(bTimestamp);
+
   if (aHasTs && bHasTs) {
-    const aTimestamp = a.timestampMs;
-    const bTimestamp = b.timestampMs;
     if (aTimestamp !== bTimestamp) {
       return aTimestamp - bTimestamp;
     }
@@ -212,6 +213,7 @@ const compareEntries = (a: TranscriptEntry, b: TranscriptEntry): number => {
   } else if (aHasTs !== bHasTs) {
     return aHasTs ? -1 : 1;
   }
+
   return a.sequenceKey - b.sequenceKey;
 };
 
