@@ -1,5 +1,5 @@
 import type { AgentState, FocusFilter } from "@/features/agents/state/store";
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import { AgentAvatar } from "./AgentAvatar";
 import { EmptyStatePanel } from "./EmptyStatePanel";
 
@@ -44,15 +44,26 @@ export const FleetSidebar = ({
 }: FleetSidebarProps) => {
   const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const previousTopByAgentIdRef = useRef<Map<string, number>>(new Map());
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const agentOrderKey = useMemo(() => agents.map((agent) => agent.agentId).join("|"), [agents]);
 
   useLayoutEffect(() => {
+    const scroller = scrollContainerRef.current;
+    if (!scroller) return;
+    const scrollerRect = scroller.getBoundingClientRect();
+
+    const getTopInScrollContent = (node: HTMLElement) =>
+      node.getBoundingClientRect().top - scrollerRect.top + scroller.scrollTop;
+
     const nextTopByAgentId = new Map<string, number>();
-    for (const agent of agents) {
-      const node = rowRefs.current.get(agent.agentId);
+    const agentIds = agentOrderKey.length === 0 ? [] : agentOrderKey.split("|");
+    for (const agentId of agentIds) {
+      const node = rowRefs.current.get(agentId);
       if (!node) continue;
-      const nextTop = node.getBoundingClientRect().top;
-      nextTopByAgentId.set(agent.agentId, nextTop);
-      const previousTop = previousTopByAgentIdRef.current.get(agent.agentId);
+      const nextTop = getTopInScrollContent(node);
+      nextTopByAgentId.set(agentId, nextTop);
+      const previousTop = previousTopByAgentIdRef.current.get(agentId);
       if (typeof previousTop !== "number") continue;
       const deltaY = previousTop - nextTop;
       if (Math.abs(deltaY) < 0.5) continue;
@@ -63,7 +74,7 @@ export const FleetSidebar = ({
       );
     }
     previousTopByAgentIdRef.current = nextTopByAgentId;
-  }, [agents]);
+  }, [agentOrderKey]);
 
   return (
     <aside
@@ -105,7 +116,7 @@ export const FleetSidebar = ({
         })}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto">
         {agents.length === 0 ? (
           <EmptyStatePanel title="No agents available." compact className="p-3 text-xs" />
         ) : (
