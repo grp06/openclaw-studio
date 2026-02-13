@@ -76,10 +76,12 @@ import {
   upsertPendingGuidedSetup,
 } from "@/features/agents/creation/recovery";
 import {
-  loadPendingGuidedSetupsFromStorage,
   normalizePendingGuidedSetupGatewayScope,
-  persistPendingGuidedSetupsToStorage,
 } from "@/features/agents/creation/pendingSetupStore";
+import {
+  loadPendingGuidedSetupsForScope,
+  persistPendingGuidedSetupsForScopeWhenLoaded,
+} from "@/features/agents/creation/pendingGuidedSetupSessionStorageLifecycle";
 import {
   applyGuidedAgentSetup,
   type AgentGuidedSetup,
@@ -888,12 +890,12 @@ const AgentStudioPage = () => {
   }, [setLoading, status]);
 
   useEffect(() => {
-    const loaded = loadPendingGuidedSetupsFromStorage({
+    const loaded = loadPendingGuidedSetupsForScope({
       storage: window.sessionStorage,
       gatewayScope: pendingGuidedSetupGatewayScope,
     });
-    setPendingCreateSetupsByAgentId(loaded);
-    setPendingCreateSetupsLoadedScope(pendingGuidedSetupGatewayScope);
+    setPendingCreateSetupsByAgentId(loaded.setupsByAgentId);
+    setPendingCreateSetupsLoadedScope(loaded.loadedScope);
   }, [pendingGuidedSetupGatewayScope]);
 
   useEffect(() => {
@@ -910,10 +912,10 @@ const AgentStudioPage = () => {
   }, [status]);
 
   useEffect(() => {
-    if (pendingCreateSetupsLoadedScope !== pendingGuidedSetupGatewayScope) return;
-    persistPendingGuidedSetupsToStorage({
+    persistPendingGuidedSetupsForScopeWhenLoaded({
       storage: window.sessionStorage,
       gatewayScope: pendingGuidedSetupGatewayScope,
+      loadedScope: pendingCreateSetupsLoadedScope,
       setupsByAgentId: pendingCreateSetupsByAgentId,
     });
   }, [pendingCreateSetupsByAgentId, pendingCreateSetupsLoadedScope, pendingGuidedSetupGatewayScope]);
