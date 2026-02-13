@@ -53,6 +53,7 @@ export const applyPendingGuidedSetupForAgent = async (params: {
     client: params.client,
     agentId: id,
     setup,
+    includeAgentOverrides: false,
   });
   return {
     applied: true,
