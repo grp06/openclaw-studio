@@ -8,7 +8,17 @@ describe("media-markdown", () => {
     const out = rewriteMediaLinesToMarkdown(input);
 
     expect(out).toContain("![](/api/gateway/media?path=");
-    expect(out).toContain("`MEDIA: /home/ubuntu/.openclaw/workspace-agent/foo.png`");
+    expect(out).toContain("MEDIA: /home/ubuntu/.openclaw/workspace-agent/foo.png");
+    expect(out).toContain("Hello");
+    expect(out).toContain("Done");
+  });
+
+  it("rewrites MEDIA: with the image path on the next line", () => {
+    const input = "Hello\nMEDIA:\n/home/ubuntu/.openclaw/workspace-agent/foo.png\nDone";
+    const out = rewriteMediaLinesToMarkdown(input);
+
+    expect(out).toContain("![](/api/gateway/media?path=");
+    expect(out).toContain("MEDIA: /home/ubuntu/.openclaw/workspace-agent/foo.png");
     expect(out).toContain("Hello");
     expect(out).toContain("Done");
   });

@@ -1,4 +1,5 @@
 const MEDIA_LINE_RE = /^\s*MEDIA:\s*(.+?)\s*$/;
+const MEDIA_ONLY_RE = /^\s*MEDIA:\s*$/;
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
@@ -30,7 +31,8 @@ export const rewriteMediaLinesToMarkdown = (text: string): string => {
   const out: string[] = [];
   let inFence = false;
 
-  for (const line of lines) {
+  for (let idx = 0; idx < lines.length; idx += 1) {
+    const line = lines[idx] ?? "";
     const trimmed = line.trimStart();
     if (trimmed.startsWith("```")) {
       inFence = !inFence;
@@ -42,25 +44,32 @@ export const rewriteMediaLinesToMarkdown = (text: string): string => {
       continue;
     }
 
+    let mediaPath: string | null = null;
+    let consumesNextLine = false;
     const match = line.match(MEDIA_LINE_RE);
-    if (!match) {
+    if (match) {
+      mediaPath = (match[1] ?? "").trim() || null;
+    } else if (MEDIA_ONLY_RE.test(line)) {
+      const next = (lines[idx + 1] ?? "").trim();
+      if (isImagePath(next)) {
+        mediaPath = next;
+        consumesNextLine = true;
+      }
+    }
+    if (!mediaPath) {
       out.push(line);
       continue;
     }
 
-    const path = (match[1] ?? "").trim();
-    if (!path) {
-      out.push(line);
-      continue;
-    }
+    const url = toMediaUrl(mediaPath);
 
-    const url = toMediaUrl(path);
-
-    if (isImagePath(path)) {
-      // Include the original path in a code span for easy copy/debugging.
+    if (isImagePath(mediaPath)) {
       out.push(`![](${url})`);
       out.push("");
-      out.push(`\`MEDIA: ${path}\``);
+      out.push(`MEDIA: ${mediaPath}`);
+      if (consumesNextLine) {
+        idx += 1;
+      }
       continue;
     }
 
