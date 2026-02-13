@@ -76,6 +76,22 @@ export const isSameSessionKey = (a: string, b: string) => {
   return left.length > 0 && left === right;
 };
 
+const CONNECT_FAILED_CLOSE_CODE = 4008;
+
+const parseConnectFailedCloseReason = (
+  reason: string
+): { code: string; message: string } | null => {
+  const trimmed = reason.trim();
+  if (!trimmed.toLowerCase().startsWith("connect failed:")) return null;
+  const remainder = trimmed.slice("connect failed:".length).trim();
+  if (!remainder) return null;
+  const idx = remainder.indexOf(" ");
+  const code = (idx === -1 ? remainder : remainder.slice(0, idx)).trim();
+  if (!code) return null;
+  const message = (idx === -1 ? "" : remainder.slice(idx + 1)).trim();
+  return { code, message: message || "connect failed" };
+};
+
 const DEFAULT_UPSTREAM_GATEWAY_URL =
   process.env.NEXT_PUBLIC_GATEWAY_URL || "ws://localhost:18789";
 
@@ -171,16 +187,23 @@ export class GatewayClient {
         this.resolveConnect?.();
         this.clearConnectPromise();
       },
-      onEvent: (event) => {
-        this.eventHandlers.forEach((handler) => handler(event));
-      },
-      onClose: ({ code, reason }) => {
-        const err = new Error(`Gateway closed (${code}): ${reason}`);
-        if (this.rejectConnect) {
-          this.rejectConnect(err);
-          this.clearConnectPromise();
-        }
-        this.updateStatus(this.manualDisconnect ? "disconnected" : "connecting");
+	      onEvent: (event) => {
+	        this.eventHandlers.forEach((handler) => handler(event));
+	      },
+	      onClose: ({ code, reason }) => {
+	        const connectFailed =
+	          code === CONNECT_FAILED_CLOSE_CODE ? parseConnectFailedCloseReason(reason) : null;
+	        const err = connectFailed
+	          ? new GatewayResponseError({
+	              code: connectFailed.code,
+	              message: connectFailed.message,
+	            })
+	          : new Error(`Gateway closed (${code}): ${reason}`);
+	        if (this.rejectConnect) {
+	          this.rejectConnect(err);
+	          this.clearConnectPromise();
+	        }
+	        this.updateStatus(this.manualDisconnect ? "disconnected" : "connecting");
         if (this.manualDisconnect) {
           console.info("Gateway disconnected.");
         }
