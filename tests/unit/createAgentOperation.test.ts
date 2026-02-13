@@ -191,6 +191,37 @@ describe("createAgentOperation", () => {
     expect(calls.lastIndexOf("config.patch")).toBeGreaterThan(lastFilesSet);
   });
 
+  it("skips agent override config.patch when includeAgentOverrides is false", async () => {
+    const setup = createSetup();
+    const calls: string[] = [];
+    const client = {
+      call: vi.fn(async (method: string) => {
+        calls.push(method);
+        if (method === "agents.files.set") return { ok: true };
+        if (method === "exec.approvals.get") {
+          return { exists: true, hash: "ap-3", file: { version: 1, agents: {} } };
+        }
+        if (method === "exec.approvals.set") return { ok: true };
+        if (method === "config.get" || method === "config.patch") {
+          throw new Error(`unexpected method ${method}`);
+        }
+        throw new Error(`unexpected method ${method}`);
+      }),
+    } as unknown as GatewayClient;
+
+    await expect(
+      applyGuidedAgentSetup({
+        client,
+        agentId: "agent-no-overrides",
+        setup,
+        includeAgentOverrides: false,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(calls).not.toContain("config.get");
+    expect(calls).not.toContain("config.patch");
+  });
+
   it("applies setup compiled from PR Engineer bundle without creating a new agent", async () => {
     const setup = createSetupFromBundle("pr-engineer");
     const calls: string[] = [];

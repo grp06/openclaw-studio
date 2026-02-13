@@ -1613,6 +1613,7 @@ const AgentStudioPage = () => {
                   client,
                   agentId: created.id,
                   setup,
+                  includeAgentOverrides: false,
                 });
                 setPendingCreateSetupsByAgentId((current) =>
                   removePendingGuidedSetup(current, created.id)
@@ -1651,6 +1652,7 @@ const AgentStudioPage = () => {
                 client,
                 agentId: created.id,
                 setup,
+                includeAgentOverrides: false,
               });
               setPendingCreateSetupsByAgentId((current) =>
                 removePendingGuidedSetup(current, created.id)

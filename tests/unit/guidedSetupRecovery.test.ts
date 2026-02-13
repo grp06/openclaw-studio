@@ -133,6 +133,7 @@ describe("guided setup recovery", () => {
     expect(result.applied).toBe(true);
     expect(result.pendingSetupsByAgentId).toEqual({});
     expect(callLog).not.toContain("agents.create");
+    expect(callLog).not.toContain("config.patch");
   });
 
   it("removes only the applied pending setup entry on success", async () => {
@@ -207,5 +208,6 @@ describe("guided setup recovery", () => {
     expect(result.applied).toBe(true);
     expect(result.pendingSetupsByAgentId).toEqual({});
     expect(calls).not.toContain("agents.create");
+    expect(calls).not.toContain("config.patch");
   });
 });

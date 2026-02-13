@@ -28,6 +28,7 @@ export const applyGuidedAgentSetup = async (params: {
   client: GatewayClient;
   agentId: string;
   setup: AgentGuidedSetup;
+  includeAgentOverrides?: boolean;
 }): Promise<void> => {
   const agentId = params.agentId.trim();
   if (!agentId) {
@@ -43,11 +44,13 @@ export const applyGuidedAgentSetup = async (params: {
     agentId,
     policy: params.setup.execApprovals,
   });
-  await updateGatewayAgentOverrides({
-    client: params.client,
-    agentId,
-    overrides: params.setup.agentOverrides,
-  });
+  if (params.includeAgentOverrides !== false) {
+    await updateGatewayAgentOverrides({
+      client: params.client,
+      agentId,
+      overrides: params.setup.agentOverrides,
+    });
+  }
 };
 
 export const createAgentWithOptionalSetup = async (params: {
