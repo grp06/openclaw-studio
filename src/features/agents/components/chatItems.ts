@@ -75,6 +75,22 @@ export const buildFinalAgentChatItems = ({
 >): AgentChatItem[] => {
   const items: AgentChatItem[] = [];
   let currentMeta: ItemMeta | null = null;
+  let pendingExecOutputs: string[] = [];
+  const flushPendingExecOutputs = () => {
+    if (pendingExecOutputs.length === 0) return;
+    const combined = pendingExecOutputs.join("\n\n");
+    pendingExecOutputs = [];
+    items.push({
+      kind: "assistant",
+      text: normalizeAssistantDisplayText(combined),
+      ...(currentMeta
+        ? { timestampMs: currentMeta.timestampMs, thinkingDurationMs: currentMeta.thinkingDurationMs }
+        : {}),
+    });
+  };
+  const clearPendingExecOutputs = () => {
+    pendingExecOutputs = [];
+  };
   const appendThinking = (text: string) => {
     const normalized = text.trim();
     if (!normalized) return;
@@ -124,16 +140,7 @@ export const buildFinalAgentChatItems = ({
       if (!toolCallingEnabled) {
         const coerced = coerceToolMarkdownToAssistantText(line);
         if (coerced) {
-          items.push({
-            kind: "assistant",
-            text: normalizeAssistantDisplayText(coerced),
-            ...(currentMeta
-              ? {
-                  timestampMs: currentMeta.timestampMs,
-                  thinkingDurationMs: currentMeta.thinkingDurationMs,
-                }
-              : {}),
-          });
+          pendingExecOutputs.push(coerced);
         }
         continue;
       }
@@ -146,6 +153,7 @@ export const buildFinalAgentChatItems = ({
     }
     const trimmed = line.trim();
     if (trimmed.startsWith(">")) {
+      flushPendingExecOutputs();
       const text = trimmed.replace(/^>\s?/, "").trim();
       if (text) {
         const normalized = normalizeUserDisplayText(text);
@@ -188,6 +196,7 @@ export const buildFinalAgentChatItems = ({
     }
     const normalizedAssistant = normalizeAssistantDisplayText(line);
     if (!normalizedAssistant) continue;
+    clearPendingExecOutputs();
     items.push({
       kind: "assistant",
       text: normalizedAssistant,
@@ -195,6 +204,7 @@ export const buildFinalAgentChatItems = ({
     });
   }
 
+  flushPendingExecOutputs();
   return items;
 };
 
@@ -207,6 +217,22 @@ export const buildAgentChatItems = ({
 }: BuildAgentChatItemsInput): AgentChatItem[] => {
   const items: AgentChatItem[] = [];
   let currentMeta: ItemMeta | null = null;
+  let pendingExecOutputs: string[] = [];
+  const flushPendingExecOutputs = () => {
+    if (pendingExecOutputs.length === 0) return;
+    const combined = pendingExecOutputs.join("\n\n");
+    pendingExecOutputs = [];
+    items.push({
+      kind: "assistant",
+      text: normalizeAssistantDisplayText(combined),
+      ...(currentMeta
+        ? { timestampMs: currentMeta.timestampMs, thinkingDurationMs: currentMeta.thinkingDurationMs }
+        : {}),
+    });
+  };
+  const clearPendingExecOutputs = () => {
+    pendingExecOutputs = [];
+  };
   const appendThinking = (text: string, live?: boolean) => {
     const normalized = text.trim();
     if (!normalized) return;
@@ -261,16 +287,7 @@ export const buildAgentChatItems = ({
       if (!toolCallingEnabled) {
         const coerced = coerceToolMarkdownToAssistantText(line);
         if (coerced) {
-          items.push({
-            kind: "assistant",
-            text: normalizeAssistantDisplayText(coerced),
-            ...(currentMeta
-              ? {
-                  timestampMs: currentMeta.timestampMs,
-                  thinkingDurationMs: currentMeta.thinkingDurationMs,
-                }
-              : {}),
-          });
+          pendingExecOutputs.push(coerced);
         }
         continue;
       }
@@ -283,6 +300,7 @@ export const buildAgentChatItems = ({
     }
     const trimmed = line.trim();
     if (trimmed.startsWith(">")) {
+      flushPendingExecOutputs();
       const text = trimmed.replace(/^>\s?/, "").trim();
       if (text) {
         const currentTimestamp =
@@ -300,12 +318,20 @@ export const buildAgentChatItems = ({
     }
     const normalizedAssistant = normalizeAssistantDisplayText(line);
     if (!normalizedAssistant) continue;
+    clearPendingExecOutputs();
     items.push({
       kind: "assistant",
       text: normalizedAssistant,
       ...(currentMeta ? { timestampMs: currentMeta.timestampMs, thinkingDurationMs: currentMeta.thinkingDurationMs } : {}),
     });
   }
+
+  const liveStream = streamText?.trim();
+  if (liveStream) {
+    clearPendingExecOutputs();
+  }
+
+  flushPendingExecOutputs();
 
   if (showThinkingTraces) {
     const normalizedLiveThinking = normalizeThinkingDisplayText(liveThinkingTrace);
@@ -314,7 +340,6 @@ export const buildAgentChatItems = ({
     }
   }
 
-  const liveStream = streamText?.trim();
   if (liveStream) {
     const normalizedStream = normalizeAssistantDisplayText(liveStream);
     if (normalizedStream) {
