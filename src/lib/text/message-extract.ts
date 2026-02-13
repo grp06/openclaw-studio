@@ -41,6 +41,18 @@ const EXEC_APPROVAL_WAIT_POLICY = [
   'If approved command output is unavailable, reply exactly: "Waiting for approved command result."',
 ].join("\n");
 
+const stripAppendedExecApprovalPolicy = (text: string): string => {
+  const suffix = `\n\n${EXEC_APPROVAL_WAIT_POLICY}`;
+  if (!text.endsWith(suffix)) return text;
+  return text.slice(0, -suffix.length);
+};
+
+const ASSISTANT_PREFIX_RE = /^\[reply_to_current\]\s*(?:\|\s*)?/i;
+const stripAssistantPrefix = (text: string): string => {
+  if (!text) return text;
+  return text.replace(ASSISTANT_PREFIX_RE, "").trimStart();
+};
+
 type ToolCallRecord = {
   id?: string;
   name?: string;
@@ -58,6 +70,7 @@ type ToolResultRecord = {
 const looksLikeEnvelopeHeader = (header: string): boolean => {
   if (/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z\b/.test(header)) return true;
   if (/\d{4}-\d{2}-\d{2} \d{2}:\d{2}\b/.test(header)) return true;
+  if (/[A-Za-z]{3} \d{4}-\d{2}-\d{2} \d{2}:\d{2}\b/.test(header)) return true;
   return ENVELOPE_CHANNELS.some((label) => header.startsWith(`${label} `));
 };
 
@@ -127,8 +140,12 @@ export const extractText = (message: unknown): string | null => {
   const role = typeof m.role === "string" ? m.role : "";
   const content = m.content;
 
-  const postProcess = (value: string): string =>
-    role === "assistant" ? stripThinkingTagsFromAssistantText(value) : stripEnvelope(value);
+  const postProcess = (value: string): string => {
+    if (role === "assistant") {
+      return stripAssistantPrefix(stripThinkingTagsFromAssistantText(value));
+    }
+    return stripAppendedExecApprovalPolicy(stripEnvelope(value));
+  };
 
   if (typeof content === "string") {
     return postProcess(content);
@@ -488,10 +505,7 @@ export const parseToolMarkdown = (
 export const buildAgentInstruction = ({
   message,
 }: AgentInstructionParams): string => {
-  const trimmed = message.trim();
-  if (!trimmed) return trimmed;
-  if (trimmed.startsWith("/")) return trimmed;
-  return `${trimmed}\n\n${EXEC_APPROVAL_WAIT_POLICY}`;
+  return message.trim();
 };
 
 const PROJECT_PROMPT_BLOCK_RE = /^(?:Project|Workspace) path:[\s\S]*?\n\s*\n/i;

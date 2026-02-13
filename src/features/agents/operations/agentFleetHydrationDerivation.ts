@@ -55,6 +55,35 @@ type ExecPolicyEntry = {
   ask?: ExecAsk;
 };
 
+type SandboxMode = "off" | "non-main" | "all";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === "object" && !Array.isArray(value));
+
+const resolveAgentSandboxMode = (
+  agentId: string,
+  snapshot: GatewayModelPolicySnapshot | null
+): SandboxMode | null => {
+  const resolvedAgentId = agentId.trim();
+  if (!resolvedAgentId) return null;
+  const configRaw = snapshot?.config as unknown;
+  if (!isRecord(configRaw)) return null;
+  const agents = isRecord(configRaw.agents) ? configRaw.agents : null;
+  const list = Array.isArray(agents?.list) ? agents?.list : [];
+  for (const entryRaw of list) {
+    if (!isRecord(entryRaw)) continue;
+    const id = typeof entryRaw.id === "string" ? entryRaw.id.trim() : "";
+    if (!id || id !== resolvedAgentId) continue;
+    const sandbox = isRecord(entryRaw.sandbox) ? entryRaw.sandbox : null;
+    const modeRaw = typeof sandbox?.mode === "string" ? sandbox.mode.trim().toLowerCase() : "";
+    if (modeRaw === "off" || modeRaw === "non-main" || modeRaw === "all") {
+      return modeRaw;
+    }
+    return null;
+  }
+  return null;
+};
+
 const normalizeExecHost = (raw: string | null | undefined): ExecHost | undefined => {
   if (typeof raw !== "string") return undefined;
   const normalized = raw.trim().toLowerCase();
@@ -189,10 +218,16 @@ export const deriveHydrateAgentFleetResult = (
     const sessionExecSecurity = normalizeExecSecurity(mainSession?.execSecurity);
     const sessionExecAsk = normalizeExecAsk(mainSession?.execAsk);
     const policy = execPolicyByAgentId.get(agent.id);
+    const sandboxMode = resolveAgentSandboxMode(agent.id, input.configSnapshot);
     const resolvedExecSecurity = sessionExecSecurity ?? policy?.security;
     const resolvedExecAsk = sessionExecAsk ?? policy?.ask;
     const resolvedExecHost =
-      sessionExecHost ?? (resolvedExecSecurity || resolvedExecAsk ? "gateway" : undefined);
+      sessionExecHost ??
+      (resolvedExecSecurity || resolvedExecAsk
+        ? sandboxMode === "all"
+          ? "sandbox"
+          : "gateway"
+        : undefined);
     const expectsExecOverrides = Boolean(
       resolvedExecHost || resolvedExecSecurity || resolvedExecAsk
     );
@@ -279,4 +314,3 @@ export const deriveHydrateAgentFleetResult = (
     configSnapshot: input.configSnapshot ?? null,
   };
 };
-

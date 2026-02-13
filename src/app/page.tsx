@@ -19,6 +19,7 @@ import {
 } from "@/lib/text/message-extract";
 import {
   parseAgentIdFromSessionKey,
+  syncGatewaySessionSettings,
   useGatewayConnection,
 } from "@/lib/gateway/GatewayClient";
 import { createRafBatcher } from "@/lib/dom";
@@ -2257,6 +2258,16 @@ const AgentStudioPage = () => {
               : undefined;
           const list = readConfigAgentList(baseConfig);
           const configEntry = list.find((entry) => entry.id === resolvedAgentId) ?? null;
+          const sandboxRaw =
+            configEntry && typeof (configEntry as Record<string, unknown>).sandbox === "object"
+              ? ((configEntry as Record<string, unknown>).sandbox as unknown)
+              : null;
+          const sandbox =
+            sandboxRaw && typeof sandboxRaw === "object" && !Array.isArray(sandboxRaw)
+              ? (sandboxRaw as Record<string, unknown>)
+              : null;
+          const sandboxMode =
+            typeof sandbox?.mode === "string" ? sandbox.mode.trim().toLowerCase() : "";
 
           const toolsRaw =
             configEntry && typeof (configEntry as Record<string, unknown>).tools === "object"
@@ -2299,6 +2310,28 @@ const AgentStudioPage = () => {
             overrides: {
               tools: usesAllow ? { allow: allowedList, deny: denyList } : { alsoAllow: allowedList, deny: denyList },
             },
+          });
+
+          const execHost =
+            role === "conservative"
+              ? null
+              : sandboxMode === "all"
+                ? "sandbox"
+                : "gateway";
+          const execSecurity =
+            role === "conservative"
+              ? "deny"
+              : role === "autonomous"
+                ? "full"
+                : "allowlist";
+          const execAsk =
+            role === "conservative" ? "off" : role === "autonomous" ? "off" : "always";
+          await syncGatewaySessionSettings({
+            client,
+            sessionKey: agent.sessionKey,
+            execHost,
+            execSecurity,
+            execAsk,
           });
 
           await loadAgents();
