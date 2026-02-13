@@ -201,8 +201,10 @@ const compareEntries = (a: TranscriptEntry, b: TranscriptEntry): number => {
   const bHasTs = hasNumericTimestamp(bTimestamp);
 
   if (aHasTs && bHasTs) {
-    if (aTimestamp !== bTimestamp) {
-      return aTimestamp - bTimestamp;
+    const aTs = aTimestamp as number;
+    const bTs = bTimestamp as number;
+    if (aTs !== bTs) {
+      return aTs - bTs;
     }
     if (a.kind !== b.kind) {
       return KIND_ORDER[a.kind] - KIND_ORDER[b.kind];
