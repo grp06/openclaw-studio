@@ -50,7 +50,89 @@ openclaw config get gateway.auth.token
 
 ### Remote access (VPS, Tailscale, SSH)
 
-For remote access recipes and troubleshooting, see `docs/remote-access.md`.
+Studio is designed to work when the browser device (laptop/phone) is not the same machine as Studio or the Gateway. The key is understanding which machine is making which connection.
+
+#### Connection model (two network paths)
+
+Studio does not have your browser connect directly to the upstream Gateway URL.
+
+There are two separate network paths:
+
+1. Browser -> Studio
+   - HTTP for the UI, plus a WebSocket to Studio at `/api/gateway/ws`.
+2. Studio -> OpenClaw Gateway (upstream)
+   - A second WebSocket opened by the Studio Node server to the configured upstream Gateway URL.
+
+When troubleshooting, always ask: is the problem Browser->Studio, or Studio->Gateway?
+
+#### What “localhost” means
+
+The “Upstream Gateway URL” is dialed by the machine running Studio.
+
+- If Studio runs on your laptop: `ws://localhost:18789` means “gateway on your laptop”.
+- If Studio runs on a VPS: `ws://localhost:18789` means “gateway on the VPS”, even when you open Studio from a phone.
+
+#### Where Studio stores the upstream URL/token
+
+Studio persists upstream connection settings on the Studio host:
+
+- Settings file: `<state dir>/openclaw-studio/settings.json`
+- Default `<state dir>`: `~/.openclaw` (with legacy fallbacks to `~/.moltbot` and `~/.clawdbot`)
+- Override state dir: `OPENCLAW_STATE_DIR`
+
+The UI reads/writes these via `GET/PUT /api/studio`. If you set a URL/token once in the UI, those values will be used on the next run on that same Studio host.
+
+#### Recipes
+
+##### A) Studio on your laptop, Gateway on a remote host
+
+In Studio, set:
+- Upstream Gateway URL: something reachable from your laptop
+- Upstream Token: `openclaw config get gateway.auth.token` (run on the gateway host)
+
+Options:
+
+1. Direct port (only if you intentionally expose it)
+   - Upstream URL: `ws://<gateway-host>:18789`
+2. Tailscale Serve for the gateway (recommended over public exposure)
+   - On the gateway host: `tailscale serve status`
+   - Example serve rule: `tailscale serve --yes --bg --https 443 http://127.0.0.1:18789`
+   - In Studio: Upstream URL `wss://<gateway-host>.ts.net`
+3. SSH tunnel
+   - From your laptop: `ssh -L 18789:127.0.0.1:18789 user@<gateway-host>`
+   - In Studio: Upstream URL `ws://localhost:18789`
+
+##### B) Studio + Gateway on the same VPS (use from laptop/phone)
+
+This is the simplest remote setup: keep the gateway private on the VPS and only expose Studio.
+
+1. On the VPS, run the gateway bound to loopback:
+   - `openclaw gateway run --bind loopback --port 18789 --verbose`
+2. On the VPS, expose Studio over HTTPS on your tailnet (example: 443):
+   - Check current config: `tailscale serve status`
+   - Add a serve rule: `tailscale serve --yes --bg --https 443 http://127.0.0.1:3000`
+
+Notes:
+- `tailscale serve reset` clears all Serve config. Avoid it unless you are intentionally wiping existing rules.
+- Avoid serving Studio behind a path prefix like `/studio` unless you configure Next.js `basePath` and rebuild. Prefer serving Studio at `/`.
+
+3. From your laptop/phone, open `https://<your-vps>.ts.net`
+4. In Studio, set:
+   - Upstream URL: `ws://localhost:18789`
+   - Token: `openclaw config get gateway.auth.token` (run on the VPS)
+
+Optional (only if you need non-Studio clients to reach the gateway):
+- Expose the gateway too (example: 8443):
+  - `tailscale serve --yes --bg --https 8443 http://127.0.0.1:18789`
+  - Upstream URL: `wss://<your-vps>.ts.net:8443`
+
+##### C) Studio on a VPS, Gateway somewhere else
+
+In this topology, Studio must be able to reach the gateway from the VPS network.
+
+In Studio, set:
+- Upstream URL: `ws://<gateway-host>:18789` (plain)
+- Or `wss://<gateway-host>...` (TLS)
 
 ### Install + run Studio (recommended)
 ```bash
@@ -124,7 +206,33 @@ Paths and key settings:
 
 ## Troubleshooting
 
-See `docs/remote-access.md` for VPS/Tailscale/SSH recipes and a troubleshooting checklist (including TLS `EPROTO` errors, path-prefix asset issues, and missing-token errors).
+### Identify which side is broken
+
+- If the Studio page does not load: Browser->Studio (HTTP) problem.
+- If the Studio page loads but “Connect” fails: likely Studio->Gateway (upstream) problem.
+
+### Proxy error codes
+
+Studio’s WS bridge can surface upstream problems as specific codes:
+
+- `studio.gateway_url_missing`: upstream URL not configured on the Studio host.
+- `studio.gateway_token_missing`: upstream token not configured on the Studio host.
+- `studio.gateway_url_invalid`: upstream URL is malformed (must be `ws://...` or `wss://...`).
+- `studio.settings_load_failed`: Studio host failed to read settings from disk.
+- `studio.upstream_error`: Studio could not establish the upstream WebSocket.
+- `studio.upstream_closed`: the upstream gateway closed the connection.
+
+### Common symptoms
+
+- TLS errors like `EPROTO` / “wrong version number”
+  - Usually: you used `wss://...` to an endpoint that is only serving plain HTTP/WS.
+  - Fix: use `ws://...` for plain endpoints, or put the gateway behind HTTPS (for example Tailscale Serve) and use `wss://...`.
+- Assets 404 / blank page when reverse-proxying under `/studio`
+  - Studio is not configured with a Next.js `basePath` by default.
+  - Fix: serve it at `/`, or configure `basePath` in `next.config.ts` and rebuild.
+- 401 “Studio access token required”
+  - `STUDIO_ACCESS_TOKEN` is enabled on the Studio server.
+  - Fix: open `/?access_token=...` once to set the cookie, then reload.
 
 ## Architecture
 
