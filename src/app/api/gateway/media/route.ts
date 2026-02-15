@@ -4,9 +4,9 @@ import { isLocalGatewayUrl } from "@/lib/gateway/local-gateway";
 import {
   resolveConfiguredSshTarget,
   resolveGatewaySshTargetFromGatewayUrl,
+  runSshJson,
 } from "@/lib/ssh/gateway-host";
 import { loadStudioSettings } from "@/lib/studio/settings-store";
-import * as childProcess from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -179,27 +179,14 @@ export async function GET(request: Request) {
 
     const { remotePath, mime } = validateRemoteMediaPath(rawPath);
 
-    const result = childProcess.spawnSync(
-      "ssh",
-      ["-o", "BatchMode=yes", sshTarget, "bash", "-s", "--", remotePath],
-      {
-        input: REMOTE_READ_SCRIPT,
-        encoding: "utf8",
-        maxBuffer: Math.ceil(MAX_MEDIA_BYTES * 1.6),
-      }
-    );
-
-    if (result.error) {
-      throw new Error(`Failed to execute ssh (${sshTarget}): ${result.error.message}`);
-    }
-
-    if (result.status !== 0) {
-      const stdout = result.stdout?.trim() ?? "";
-      const stderr = result.stderr?.trim() ?? "";
-      throw new Error(stderr || stdout || `Failed to fetch media over ssh (${sshTarget})`);
-    }
-
-    const payload = JSON.parse((result.stdout ?? "").trim()) as {
+    const payload = runSshJson({
+      sshTarget,
+      argv: ["bash", "-s", "--", remotePath],
+      label: "gateway media read",
+      input: REMOTE_READ_SCRIPT,
+      fallbackMessage: `Failed to fetch media over ssh (${sshTarget})`,
+      maxBuffer: Math.ceil(MAX_MEDIA_BYTES * 1.6),
+    }) as {
       ok?: boolean;
       data?: string;
       mime?: string;
