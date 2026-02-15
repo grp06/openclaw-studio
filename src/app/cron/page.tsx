@@ -25,6 +25,7 @@ type CronPayload =
   | { kind: "agentTurn"; message: string; model?: string; timeoutSeconds?: number };
 
 interface CronJob {
+  id: string;
   jobId: string;
   name?: string;
   schedule: CronSchedule;
@@ -388,7 +389,14 @@ export default function CronPage() {
       const result = (await client.call("cron.list", { includeDisabled: true })) as {
         jobs: CronJob[];
       };
-      setJobs(result.jobs ?? []);
+      setJobs(
+        // Gateway returns `id`; normalize to `jobId` for consistency
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (result.jobs ?? []).map((j: any) => ({
+          ...j,
+          jobId: j.jobId ?? j.id,
+        })) as CronJob[],
+      );
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load cron jobs");
