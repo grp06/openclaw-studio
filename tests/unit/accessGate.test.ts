@@ -30,7 +30,7 @@ describe("createAccessGate", () => {
 
     const handled = gate.handleHttp(
       { url: "/api/studio", headers: { host: "example.test" } },
-      res as any
+      res
     );
 
     expect(handled).toBe(true);
@@ -42,8 +42,7 @@ describe("createAccessGate", () => {
     const { createAccessGate } = await import("../../server/access-gate");
     const gate = createAccessGate({ token: "abc" });
     expect(
-      gate.allowUpgrade({ headers: { cookie: "studio_access=abc" } } as any)
+      gate.allowUpgrade({ headers: { cookie: "studio_access=abc" } })
     ).toBe(true);
   });
 });
-
