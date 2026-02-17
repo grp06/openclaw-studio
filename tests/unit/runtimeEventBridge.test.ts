@@ -511,4 +511,28 @@ Continue where you left off and finish the task.`,
       historyLoadedAt: 400,
     });
   });
+
+  it("collapses optimistic user lines when history carries a post-system timestamp envelope", () => {
+    const patch = buildHistorySyncPatch({
+      messages: [
+        {
+          role: "user",
+          timestamp: "2026-02-17T23:39:00.000Z",
+          content:
+            "System: [2026-02-17 23:38 UTC] queued\n\n[Tue 2026-02-17 23:39 UTC] Ask me some questions",
+        },
+      ],
+      currentLines: ["> Ask me some questions"],
+      loadedAt: 500,
+      status: "idle",
+      runId: null,
+    });
+
+    expect(patch).toEqual({
+      outputLines: ['[[meta]]{"role":"user","timestamp":1771371540000}', "> Ask me some questions"],
+      lastResult: null,
+      lastUserMessage: "Ask me some questions",
+      historyLoadedAt: 500,
+    });
+  });
 });

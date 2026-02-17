@@ -104,7 +104,7 @@ describe("message-extract", () => {
 [Thu 2026-02-12 01:14 UTC] nope none of those are it. keep looking
 [message_id: e050a641-aa32-4950-8083-c3bb7efdfc6d]`;
 
-    expect(stripUiMetadata(raw)).toBe("[Thu 2026-02-12 01:14 UTC] nope none of those are it. keep looking");
+    expect(stripUiMetadata(raw)).toBe("nope none of those are it. keep looking");
   });
 
   it("hides internal exec approval auto-resume messages from transcript text", () => {

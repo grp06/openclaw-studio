@@ -539,7 +539,7 @@ export const stripUiMetadata = (text: string) => {
     cleaned = cleaned.replace(PROJECT_PROMPT_BLOCK_RE, "");
   }
   cleaned = cleaned.replace(MESSAGE_ID_RE, "").trim();
-  return cleaned;
+  return stripEnvelope(cleaned);
 };
 
 export const isHeartbeatPrompt = (text: string) => {
