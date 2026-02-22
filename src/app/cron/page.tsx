@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Plus, Trash2, Pencil, Power, PowerOff, Clock, X, FileText, ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Pencil, Power, PowerOff, Clock, X, FileText, ChevronDown, ChevronRight, Play, Loader2 } from 'lucide-react';
 
 type CronSchedule =
   | { kind: 'at'; at: string }
@@ -123,6 +123,9 @@ export default function CronPage() {
   const [formPayload, setFormPayload] = useState('');
   const [formSessionTarget, setFormSessionTarget] = useState<'isolated' | 'main'>('isolated');
   const [formNotifyTelegram, setFormNotifyTelegram] = useState(false);
+
+  // Run now state
+  const [runningJobId, setRunningJobId] = useState<string | null>(null);
 
   // Reports state
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
@@ -296,6 +299,26 @@ export default function CronPage() {
       console.error('Remove failed:', err);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleRun = async (id: string) => {
+    setRunningJobId(id);
+    try {
+      const res = await fetch('/api/cron', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'run', id }),
+      });
+      if (res.ok) {
+        const { jobs: updatedJobs } = await res.json();
+        setJobs(updatedJobs);
+      }
+    } catch (err) {
+      console.error('Run failed:', err);
+    } finally {
+      // Keep spinner briefly so user sees feedback
+      setTimeout(() => setRunningJobId(null), 2000);
     }
   };
 
@@ -605,6 +628,12 @@ export default function CronPage() {
                               disabled
                             </span>
                           )}
+                          {(job.state.runningAtMs || runningJobId === job.id) && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-yellow-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-yellow-700 dark:text-yellow-400">
+                              <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                              running
+                            </span>
+                          )}
                           {(job as CronJob & { delivery?: { mode: string } }).delivery?.mode === 'announce' && (
                           <span className="inline-flex items-center gap-1 rounded-md bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-400">
                             TG
@@ -650,6 +679,19 @@ export default function CronPage() {
 
                       {/* Actions */}
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          type="button"
+                          className="ui-btn-icon h-7 w-7 !bg-transparent hover:!bg-green-500/10 text-muted-foreground hover:!text-green-600"
+                          onClick={() => handleRun(job.id)}
+                          disabled={runningJobId === job.id}
+                          title="Run Now"
+                        >
+                          {runningJobId === job.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Play className="w-3.5 h-3.5" />
+                          )}
+                        </button>
                         {hasOutputDir && (
                           <button
                             type="button"

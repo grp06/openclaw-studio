@@ -76,7 +76,8 @@ export const SessionsWidget = () => {
 
   if (!data) return null;
 
-  const totalActive = data.active.length + data.paused.length + data.exited.length;
+  const staleCount = data.stale?.length || 0;
+  const totalActive = data.active.length + data.paused.length + data.exited.length + staleCount;
   if (totalActive === 0 && data.completed.length === 0) return null;
 
   const hasPaused = data.paused.length > 0;
@@ -113,6 +114,11 @@ export const SessionsWidget = () => {
                 {data.exited.length} interrupted
               </span>
             )}
+            {staleCount > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-gray-500/15 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:text-gray-400">
+                {staleCount} stale
+              </span>
+            )}
             {data.completed.length > 0 && (
               <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                 {data.completed.length} done
@@ -147,9 +153,9 @@ export const SessionsWidget = () => {
                 Needs Your Input
               </p>
               <div className="space-y-1.5">
-                {data.paused.map((session) => (
+                {data.paused.map((session, i) => (
                   <div
-                    key={session.project}
+                    key={`${session.project}-paused-${i}`}
                     className="bg-yellow-500/15 border border-yellow-500/30 rounded-md p-2"
                   >
                     <p className="text-xs font-semibold">{session.project}</p>
@@ -169,9 +175,9 @@ export const SessionsWidget = () => {
             <div>
               <p className="text-xs font-semibold text-muted-foreground mb-1.5">Active</p>
               <div className="space-y-1.5">
-                {data.active.map((session) => (
+                {data.active.map((session, i) => (
                   <div
-                    key={session.project}
+                    key={`${session.project}-active-${i}`}
                     className="bg-green-500/10 border border-green-500/20 rounded-md p-2"
                   >
                     <div className="flex items-center justify-between">
@@ -194,10 +200,30 @@ export const SessionsWidget = () => {
             <div>
               <p className="text-xs font-semibold text-muted-foreground mb-1.5">Interrupted</p>
               <div className="space-y-1.5">
-                {data.exited.map((session) => (
+                {data.exited.map((session, i) => (
                   <div
-                    key={`${session.project}-exited`}
+                    key={`${session.project}-exited-${i}`}
                     className="bg-orange-500/10 border border-orange-500/20 rounded-md p-2"
+                  >
+                    <p className="text-xs font-medium">{session.project}</p>
+                    {session.details && (
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{session.details}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Stale */}
+          {data.stale && data.stale.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-1.5">Stale</p>
+              <div className="space-y-1.5">
+                {data.stale.map((session, i) => (
+                  <div
+                    key={`${session.project}-stale-${i}`}
+                    className="bg-gray-500/10 border border-gray-500/20 rounded-md p-2 opacity-70"
                   >
                     <p className="text-xs font-medium">{session.project}</p>
                     {session.details && (
@@ -214,9 +240,9 @@ export const SessionsWidget = () => {
             <div>
               <p className="text-xs font-semibold text-muted-foreground mb-1.5">Completed</p>
               <div className="space-y-1.5">
-                {data.completed.map((session) => (
+                {data.completed.map((session, i) => (
                   <div
-                    key={`${session.project}-${session.endTime}`}
+                    key={`${session.project}-completed-${i}`}
                     className="bg-muted/30 border border-muted/50 rounded-md p-2"
                   >
                     <div className="flex items-center justify-between">

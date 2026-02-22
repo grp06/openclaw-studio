@@ -101,6 +101,30 @@ export default function SessionsPage() {
       {/* Content */}
       <div className="flex-1 overflow-auto p-6">
         <div className="max-w-6xl mx-auto space-y-6">
+          {/* Status Legend */}
+          <div className="ui-panel p-3 flex flex-wrap gap-x-6 gap-y-1.5 text-[11px] text-muted-foreground">
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+              <span><strong className="text-foreground">Active</strong> — Claude is working</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2 rounded-full bg-yellow-500 animate-pulse" />
+              <span><strong className="text-foreground">Paused</strong> — Waiting for your input</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2 rounded-full bg-gray-500" />
+              <span><strong className="text-foreground">Stale</strong> — No update in 4+ hours</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2 rounded-full bg-orange-500" />
+              <span><strong className="text-foreground">Interrupted</strong> — Ended before finishing</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/50" />
+              <span><strong className="text-foreground">Completed</strong> — Work done, committed</span>
+            </div>
+          </div>
+
           {error && (
             <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
               <p className="text-destructive">Error: {error}</p>
@@ -114,9 +138,9 @@ export default function SessionsPage() {
             </h2>
             {data?.active && data.active.length > 0 ? (
               <div className="grid gap-3">
-                {data.active.map((session) => (
+                {data.active.map((session, i) => (
                   <div
-                    key={session.project}
+                    key={`${session.project}-active-${i}`}
                     className="glass-panel ui-panel border-l-4 border-green-500/50 p-4"
                   >
                     <div className="flex items-start justify-between">
@@ -144,6 +168,39 @@ export default function SessionsPage() {
             )}
           </div>
 
+          {/* Stale Sessions */}
+          {data?.stale && data.stale.length > 0 && (
+            <div>
+              <h2 className="text-lg font-semibold mb-3">
+                Stale ({data.stale.length})
+              </h2>
+              <div className="grid gap-3">
+                {data.stale.map((session, i) => (
+                  <div
+                    key={`${session.project}-stale-${i}`}
+                    className="glass-panel ui-panel border-l-4 border-gray-500/50 p-4 opacity-70"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <p className="font-semibold">{session.project}</p>
+                        {session.details && (
+                          <p className="text-xs text-muted-foreground mt-1">{session.details}</p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Started: {formatTime(session.startTime)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Last seen: {getElapsedTime(session.startTime)} ago
+                        </p>
+                      </div>
+                      <div className="bg-gray-500/50 rounded-full h-3 w-3"></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Paused Sessions - NEEDS INPUT */}
           <div>
             <h2 className="text-lg font-semibold mb-3">
@@ -151,9 +208,9 @@ export default function SessionsPage() {
             </h2>
             {data?.paused && data.paused.length > 0 ? (
               <div className="grid gap-3">
-                {data.paused.map((session) => (
+                {data.paused.map((session, i) => (
                   <div
-                    key={session.project}
+                    key={`${session.project}-paused-${i}`}
                     className="glass-panel ui-panel border-l-4 border-yellow-500/50 p-4 session-needs-input"
                   >
                     <div className="flex items-start justify-between">
@@ -187,9 +244,9 @@ export default function SessionsPage() {
             </h2>
             {data?.exited && data.exited.length > 0 ? (
               <div className="grid gap-3">
-                {data.exited.map((session) => (
+                {data.exited.map((session, i) => (
                   <div
-                    key={`${session.project}-exited`}
+                    key={`${session.project}-exited-${i}`}
                     className="glass-panel ui-panel border-l-4 border-orange-500/50 p-4"
                   >
                     <div className="flex items-start justify-between">
@@ -220,9 +277,9 @@ export default function SessionsPage() {
             </h2>
             {data?.completed && data.completed.length > 0 ? (
               <div className="grid gap-3">
-                {data.completed.map((session) => (
+                {data.completed.map((session, i) => (
                   <div
-                    key={`${session.project}-${session.endTime}`}
+                    key={`${session.project}-completed-${i}`}
                     className="glass-panel ui-panel p-4"
                   >
                     <div className="flex items-start justify-between">

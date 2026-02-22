@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { execFile } from 'child_process';
 import path from 'path';
 import crypto from 'crypto';
 
@@ -138,6 +139,61 @@ export async function POST(request: Request) {
         job.updatedAtMs = Date.now();
         writeJobs(data);
         return Response.json({ ok: true, job, jobs: data.jobs });
+      }
+
+      case 'run': {
+        const { id } = body;
+        if (!id) return Response.json({ error: 'id is required' }, { status: 400 });
+
+        const job = data.jobs.find(j => j.id === id);
+        if (!job) return Response.json({ error: 'Job not found' }, { status: 404 });
+
+        // Mark as running
+        job.state.runningAtMs = Date.now();
+        writeJobs(data);
+
+        // Extract the command from the payload
+        const message = job.payload.kind === 'agentTurn' ? job.payload.message : job.payload.text;
+
+        // Spawn detached so we don't block the API response
+        const startMs = Date.now();
+        const child = execFile('cmd.exe', ['/c', message], {
+          cwd: process.env.HOME || process.env.USERPROFILE || '',
+          timeout: 300_000,
+        }, () => {
+          // On completion, update state
+          try {
+            const fresh = readJobs();
+            const freshJob = fresh.jobs.find(j => j.id === id);
+            if (freshJob) {
+              freshJob.state.lastRunAtMs = startMs;
+              freshJob.state.lastDurationMs = Date.now() - startMs;
+              freshJob.state.lastStatus = 'ok';
+              freshJob.state.runningAtMs = undefined;
+              freshJob.state.lastError = undefined;
+              writeJobs(fresh);
+            }
+          } catch { /* best effort */ }
+        });
+
+        child.on('error', () => {
+          try {
+            const fresh = readJobs();
+            const freshJob = fresh.jobs.find(j => j.id === id);
+            if (freshJob) {
+              freshJob.state.lastRunAtMs = startMs;
+              freshJob.state.lastDurationMs = Date.now() - startMs;
+              freshJob.state.lastStatus = 'error';
+              freshJob.state.runningAtMs = undefined;
+              freshJob.state.lastError = 'Process failed to start';
+              writeJobs(fresh);
+            }
+          } catch { /* best effort */ }
+        });
+
+        child.unref();
+
+        return Response.json({ ok: true, message: 'Job started', job, jobs: data.jobs });
       }
 
       case 'update': {
