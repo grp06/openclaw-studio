@@ -9,6 +9,9 @@ import {
 } from "@/features/agents/components/AgentInspectPanels";
 import { FleetSidebar } from "@/features/agents/components/FleetSidebar";
 import { HeaderBar } from "@/features/agents/components/HeaderBar";
+import { SessionsWidget } from "@/components/SessionsWidget";
+import { TodosWidget } from "@/components/TodosWidget";
+import { CronWidget } from "@/components/CronWidget";
 import { ConnectionPanel } from "@/features/agents/components/ConnectionPanel";
 import { GatewayConnectScreen } from "@/features/agents/components/GatewayConnectScreen";
 import { EmptyStatePanel } from "@/features/agents/components/EmptyStatePanel";
@@ -2298,6 +2301,10 @@ const AgentStudioPage = () => {
             </div>
           </div>
         ) : null}
+
+        <SessionsWidget />
+        <TodosWidget />
+        <CronWidget />
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 xl:flex-row">
           <div className="glass-panel ui-panel p-2 xl:hidden" data-testid="mobile-pane-toggle">

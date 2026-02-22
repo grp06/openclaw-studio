@@ -1287,3 +1287,17 @@ textarea:focus::-webkit-scrollbar {
     transform: translateY(-1px);
   }
 }
+
+@keyframes sessionNeedsInputPulse {
+  0%, 100% {
+    border-left-color: color-mix(in oklch, #ca8a04 60%, transparent);
+  }
+  50% {
+    border-left-color: color-mix(in oklch, #ca8a04 100%, transparent);
+  }
+}
+
+.session-needs-input {
+  border-left: 3px solid #ca8a04;
+  animation: sessionNeedsInputPulse 2s ease-in-out infinite;
+}
