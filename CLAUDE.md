@@ -8,6 +8,31 @@ OpenClaw Studio is a Next.js App Router web dashboard for OpenClaw. It provides 
 
 **Important**: This is the frontend for OpenClaw. The OpenClaw source code lives at `~/openclaw`. Do not modify OpenClaw source code when making Studio changes. When understanding implementation context, you may need to search through OpenClaw's source, but apply solutions to this app only.
 
+## Repository Context
+
+This is a **personal fork** maintained at `tekram/openclaw-studio`, forked from the upstream open-source project at `grp06/openclaw-studio`.
+
+**Development approach:**
+- Develop and test features in personal fork branches
+- Contribute valuable features back to upstream via pull requests
+- Maintain fork-specific customizations separately when needed
+- Follow upstream's contribution guidelines and code style
+
+**Workflow:**
+1. Create feature branches in personal fork (e.g., `feat/session-tracking`)
+2. Develop and test changes locally
+3. Commit and push to personal fork
+4. Create PR from `tekram:branch` → `grp06:main` for upstream contribution
+5. Keep fork synced with upstream main branch
+
+**Git remotes:**
+- `origin`: `https://github.com/tekram/openclaw-studio.git` (personal fork)
+- Upstream should be: `https://github.com/grp06/openclaw-studio.git`
+
+When implementing features, consider whether they should be:
+- **Contributed upstream**: Generally useful features that benefit the community
+- **Fork-only**: Personal customizations or experimental features
+
 ## Development Commands
 
 ```bash
