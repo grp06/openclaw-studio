@@ -52,6 +52,7 @@ export type CronJobSummary = {
   payload: CronPayload;
   state: CronJobState;
   delivery?: CronDelivery;
+  outputDir?: string;
 };
 
 export type CronJobsResult = {
@@ -200,6 +201,19 @@ export const createCronJob = async (
     name,
     agentId,
   });
+};
+
+export type CronJobUpdatePatch = Partial<
+  Pick<CronJobCreateInput, "name" | "schedule" | "payload" | "enabled" | "delivery">
+>;
+
+export const updateCronJob = async (
+  client: GatewayClient,
+  jobId: string,
+  patch: CronJobUpdatePatch
+): Promise<CronJobSummary> => {
+  const id = resolveJobId(jobId);
+  return client.call<CronJobSummary>("cron.update", { id, patch });
 };
 
 export const removeCronJobsForAgent = async (client: GatewayClient, agentId: string): Promise<number> => {
