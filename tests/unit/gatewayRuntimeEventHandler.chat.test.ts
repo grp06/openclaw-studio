@@ -257,6 +257,56 @@ describe("gateway runtime event handler (chat)", () => {
     expect(clearPendingLivePatch).toHaveBeenCalledWith("agent-1");
   });
 
+  it("uses the current chat agent snapshot for latest-update effects", () => {
+    const agents = [
+      createAgent({
+        lastUserMessage: "hello",
+        latestOverride: null,
+        status: "running",
+        runId: "run-1",
+        runStartedAt: 900,
+      }),
+    ];
+    let getAgentsCalls = 0;
+    const getAgents = () => {
+      getAgentsCalls += 1;
+      return getAgentsCalls === 1 ? agents : [];
+    };
+    const updateSpecialLatestUpdate = vi.fn();
+
+    const handler = createGatewayRuntimeEventHandler({
+      getStatus: () => "connected",
+      getAgents,
+      dispatch: vi.fn(),
+      queueLivePatch: vi.fn(),
+      clearPendingLivePatch: vi.fn(),
+      now: () => 1000,
+      loadSummarySnapshot: vi.fn(async () => {}),
+      requestHistoryRefresh: vi.fn(async () => {}),
+      refreshHeartbeatLatestUpdate: vi.fn(),
+      bumpHeartbeatTick: vi.fn(),
+      setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
+      clearTimeout: (id) => clearTimeout(id as unknown as NodeJS.Timeout),
+      isDisconnectLikeError: () => false,
+      logWarn: vi.fn(),
+      updateSpecialLatestUpdate,
+    });
+
+    handler.handleEvent({
+      type: "event",
+      event: "chat",
+      payload: {
+        runId: "run-1",
+        sessionKey: agents[0]!.sessionKey,
+        state: "final",
+        message: { role: "assistant", content: "Done", timestamp: "2024-01-01T00:00:00.000Z" },
+      },
+    });
+
+    expect(updateSpecialLatestUpdate).toHaveBeenCalledTimes(1);
+    expect(updateSpecialLatestUpdate).toHaveBeenCalledWith("agent-1", agents[0], "hello");
+  });
+
   it("normalizes markdown-rich final assistant chat text before append and lastResult update", () => {
     const agents = [createAgent({ status: "running", runId: "run-1", runStartedAt: 900 })];
     const dispatched: Array<{ type: string; line?: string; patch?: unknown }> = [];

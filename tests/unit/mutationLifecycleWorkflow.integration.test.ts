@@ -222,6 +222,7 @@ describe("mutationLifecycleWorkflow integration", () => {
       shouldStartNextConfigMutation({
         status: "connected",
         hasRunningAgents: false,
+        nextMutationRequiresIdleAgents: false,
         hasActiveMutation: false,
         hasRestartBlockInProgress: true,
         queuedCount: 1,
@@ -232,6 +233,7 @@ describe("mutationLifecycleWorkflow integration", () => {
       shouldStartNextConfigMutation({
         status: "connected",
         hasRunningAgents: false,
+        nextMutationRequiresIdleAgents: false,
         hasActiveMutation: false,
         hasRestartBlockInProgress: false,
         queuedCount: 1,

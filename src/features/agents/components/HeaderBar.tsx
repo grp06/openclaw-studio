@@ -37,10 +37,10 @@ export const HeaderBar = ({
   }, [menuOpen]);
 
   return (
-    <div className="glass-panel fade-up ui-panel ui-topbar relative z-[180] px-3.5 py-2">
-      <div className="grid items-center gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+    <div className="glass-panel fade-up ui-panel ui-topbar relative z-[180] px-3.5 py-1.5">
+      <div className="grid items-center gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
         <div className="min-w-0">
-          <p className="console-title type-page-title text-foreground">
+          <p className="console-title type-page-title text-[21px] leading-[1.08] text-foreground">
             OpenClaw Studio
           </p>
         </div>
@@ -60,13 +60,13 @@ export const HeaderBar = ({
             <div className="relative z-[210]" ref={menuRef}>
               <button
                 type="button"
-                className="ui-btn-icon"
+                className="ui-btn-icon ui-btn-icon-sm"
                 data-testid="studio-menu-toggle"
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
                 onClick={() => setMenuOpen((prev) => !prev)}
               >
-                <Plug className="h-4 w-4" />
+                <Plug className="h-3.5 w-3.5" />
                 <span className="sr-only">Open studio menu</span>
               </button>
               {menuOpen ? (

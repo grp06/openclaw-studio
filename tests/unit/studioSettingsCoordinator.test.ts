@@ -77,7 +77,7 @@ describe("StudioSettingsCoordinator", () => {
       focused: {
         "ws://localhost:18789": {
           mode: "focused",
-          filter: "idle",
+          filter: "approvals",
           selectedAgentId: null,
         },
       },

@@ -3,7 +3,11 @@ import {
   resolveHistoryRequestIntent,
   resolveHistoryResponseDisposition,
 } from "@/features/agents/operations/historyLifecycleWorkflow";
-import { buildHistoryLines, buildHistorySyncPatch } from "@/features/agents/state/runtimeEventBridge";
+import {
+  buildHistoryLines,
+  buildHistorySyncPatch,
+  resolveHistoryRunStatePatch,
+} from "@/features/agents/state/runtimeEventBridge";
 import type { AgentState } from "@/features/agents/state/store";
 import {
   areTranscriptEntriesEqual,
@@ -222,6 +226,13 @@ export const runHistorySyncOperation = async (
             confirmed: true,
           });
       const history = buildHistoryLines(historyMessages);
+      const runStatePatch = resolveHistoryRunStatePatch({
+        status: latest.status,
+        runId: latest.runId,
+        lastRole: history.lastRole,
+        lastUserAt: history.lastUserAt,
+        loadedAt: requestIntent.loadedAt,
+      });
       const normalizedLastAssistant = history.lastAssistant
         ? normalizeAssistantDisplayText(history.lastAssistant)
         : null;
@@ -267,6 +278,7 @@ export const runHistorySyncOperation = async (
         agentId: params.agentId,
         patch: {
           ...metadataPatch,
+          ...(runStatePatch ?? {}),
           ...(transcriptChanged || linesChanged
             ? {
                 transcriptEntries: finalEntries,

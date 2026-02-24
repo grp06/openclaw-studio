@@ -261,7 +261,7 @@ describe("agent store", () => {
     expect(cleared?.hasUnseenActivity).toBe(false);
   });
 
-  it("filters_agents_by_status", () => {
+  it("filters_agents_by_status_and_approvals", () => {
     const seeds: AgentStoreSeed[] = [
       {
         agentId: "agent-1",
@@ -286,7 +286,7 @@ describe("agent store", () => {
     state = agentStoreReducer(state, {
       type: "updateAgent",
       agentId: "agent-1",
-      patch: { status: "idle" },
+      patch: { status: "idle", awaitingUserInput: true },
     });
     state = agentStoreReducer(state, {
       type: "updateAgent",
@@ -307,7 +307,7 @@ describe("agent store", () => {
     expect(getFilteredAgents(state, "running").map((agent) => agent.agentId)).toEqual([
       "agent-2",
     ]);
-    expect(getFilteredAgents(state, "idle").map((agent) => agent.agentId)).toEqual([
+    expect(getFilteredAgents(state, "approvals").map((agent) => agent.agentId)).toEqual([
       "agent-1",
     ]);
   });

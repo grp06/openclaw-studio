@@ -22,7 +22,7 @@ type FleetSidebarProps = {
 const FILTER_OPTIONS: Array<{ value: FocusFilter; label: string; testId: string }> = [
   { value: "all", label: "All", testId: "fleet-filter-all" },
   { value: "running", label: "Running", testId: "fleet-filter-running" },
-  { value: "idle", label: "Idle", testId: "fleet-filter-idle" },
+  { value: "approvals", label: "Approvals", testId: "fleet-filter-approvals" },
 ];
 
 export const FleetSidebar = ({
@@ -87,7 +87,7 @@ export const FleetSidebar = ({
         </button>
       </div>
 
-      <div className="ui-segment grid-cols-3">
+      <div className="ui-segment ui-segment-fleet-filter grid-cols-3">
         {FILTER_OPTIONS.map((option) => {
           const active = filter === option.value;
           return (
@@ -110,7 +110,7 @@ export const FleetSidebar = ({
         {agents.length === 0 ? (
           <EmptyStatePanel title="No agents available." compact className="p-3 text-xs" />
         ) : (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2.5">
             {agents.map((agent) => {
               const selected = selectedAgentId === agent.agentId;
               const avatarSeed = agent.avatarSeed ?? agent.agentId;
@@ -126,7 +126,7 @@ export const FleetSidebar = ({
                   }}
                   type="button"
                   data-testid={`fleet-agent-row-${agent.agentId}`}
-                  className={`group relative ui-card flex w-full items-center gap-4 overflow-hidden border px-3 py-5 text-left transition-colors ${
+                  className={`group relative ui-card flex w-full items-center gap-3 overflow-hidden border px-3 py-3 text-left transition-colors ${
                     selected
                       ? "ui-card-selected"
                       : "hover:bg-surface-2/45"
@@ -141,14 +141,14 @@ export const FleetSidebar = ({
                     seed={avatarSeed}
                     name={agent.name}
                     avatarUrl={agent.avatarUrl ?? null}
-                    size={28}
+                    size={42}
                     isSelected={selected}
                   />
                   <div className="min-w-0 flex-1">
                     <p className="type-secondary-heading truncate text-foreground">
                       {agent.name}
                     </p>
-                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
                       <span
                         className={`ui-badge ${resolveAgentStatusBadgeClass(agent.status)}`}
                         data-status={agent.status}

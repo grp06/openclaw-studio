@@ -8,7 +8,7 @@ const { loadUpstreamGatewaySettings } = require("./studio-settings");
 const resolveHost = () => {
   const fromEnv = process.env.HOST?.trim() || process.env.HOSTNAME?.trim();
   if (fromEnv) return fromEnv;
-  return "0.0.0.0";
+  return "::";
 };
 
 const resolvePort = () => {
@@ -61,16 +61,24 @@ async function main() {
     handle(req, res);
   });
 
-  server.on("upgrade", (req, socket, head) => {
+  const handleServerUpgrade = (req, socket, head) => {
     if (resolvePathname(req.url) === "/api/gateway/ws") {
       proxy.handleUpgrade(req, socket, head);
       return;
     }
     handleUpgrade(req, socket, head);
+  };
+  server.on("upgrade", handleServerUpgrade);
+  server.on("newListener", (eventName, listener) => {
+    if (eventName !== "upgrade") return;
+    if (listener === handleServerUpgrade) return;
+    process.nextTick(() => {
+      server.removeListener("upgrade", listener);
+    });
   });
 
   server.listen(port, hostname, () => {
-    const hostForBrowser = hostname === "0.0.0.0" ? "localhost" : hostname;
+    const hostForBrowser = hostname === "0.0.0.0" || hostname === "::" ? "localhost" : hostname;
     const browserUrl = `http://${hostForBrowser}:${port}`;
     console.info(`Open in browser: ${browserUrl}`);
   });

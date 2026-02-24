@@ -16,6 +16,7 @@ type QueuedConfigMutation = {
   id: string;
   kind: ConfigMutationKind;
   label: string;
+  requiresIdleAgents: boolean;
   run: () => Promise<void>;
   resolve: () => void;
   reject: (error: unknown) => void;
@@ -25,6 +26,9 @@ export type ActiveConfigMutation = {
   kind: ConfigMutationKind;
   label: string;
 };
+
+const mutationRequiresIdleAgents = (kind: ConfigMutationKind): boolean =>
+  kind === "create-agent" || kind === "rename-agent" || kind === "delete-agent";
 
 export function useConfigMutationQueue(params: {
   status: GatewayStatus;
@@ -37,12 +41,18 @@ export function useConfigMutationQueue(params: {
   );
 
   const enqueueConfigMutation = useCallback(
-    (params: { kind: ConfigMutationKind; label: string; run: () => Promise<void> }) =>
+    (params: {
+      kind: ConfigMutationKind;
+      label: string;
+      run: () => Promise<void>;
+      requiresIdleAgents?: boolean;
+    }) =>
       new Promise<void>((resolve, reject) => {
         const queued: QueuedConfigMutation = {
           id: randomUUID(),
           kind: params.kind,
           label: params.label,
+          requiresIdleAgents: params.requiresIdleAgents ?? mutationRequiresIdleAgents(params.kind),
           run: params.run,
           resolve,
           reject,
@@ -57,6 +67,7 @@ export function useConfigMutationQueue(params: {
       !shouldStartNextConfigMutation({
         status: params.status,
         hasRunningAgents: params.hasRunningAgents,
+        nextMutationRequiresIdleAgents: Boolean(queuedConfigMutations[0]?.requiresIdleAgents),
         hasActiveMutation: Boolean(activeConfigMutation),
         hasRestartBlockInProgress: params.hasRestartBlockInProgress,
         queuedCount: queuedConfigMutations.length,
@@ -101,6 +112,8 @@ export function useConfigMutationQueue(params: {
   return {
     enqueueConfigMutation,
     queuedCount: queuedConfigMutations.length,
+    queuedBlockedByRunningAgents:
+      Boolean(queuedConfigMutations[0]?.requiresIdleAgents) && params.hasRunningAgents,
     activeConfigMutation: activeConfigMutation
       ? ({ kind: activeConfigMutation.kind, label: activeConfigMutation.label } satisfies ActiveConfigMutation)
       : null,

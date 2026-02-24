@@ -170,6 +170,7 @@ export type AgentConfigMutationLifecycleDeps = {
     kind: ConfigMutationKind;
     label: string;
     run: () => Promise<void>;
+    requiresIdleAgents?: boolean;
   }) => Promise<void>;
   setQueuedBlock: () => void;
   setMutatingBlock: () => void;
@@ -198,6 +199,7 @@ export type CreateAgentMutationLifecycleDeps = {
     kind: ConfigMutationKind;
     label: string;
     run: () => Promise<void>;
+    requiresIdleAgents?: boolean;
   }) => Promise<void>;
   createAgent: (name: string, avatarSeed: string | null) => Promise<{ id: string }>;
   setQueuedBlock: (params: { agentName: string; startedAt: number }) => void;

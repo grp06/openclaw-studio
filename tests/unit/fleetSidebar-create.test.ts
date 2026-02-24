@@ -93,6 +93,22 @@ describe("FleetSidebar new agent action", () => {
     expect(screen.getByTestId("fleet-new-agent-button")).toBeDisabled();
   });
 
+  it("shows approvals tab instead of idle tab", () => {
+    render(
+      createElement(FleetSidebar, {
+        agents: [createAgent()],
+        selectedAgentId: "agent-1",
+        filter: "all",
+        onFilterChange: vi.fn(),
+        onSelectAgent: vi.fn(),
+        onCreateAgent: vi.fn(),
+      })
+    );
+
+    expect(screen.getByTestId("fleet-filter-approvals")).toBeInTheDocument();
+    expect(screen.queryByTestId("fleet-filter-idle")).toBeNull();
+  });
+
   it("shows needs approval badge for awaiting agents", () => {
     render(
       createElement(FleetSidebar, {

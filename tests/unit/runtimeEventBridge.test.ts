@@ -489,6 +489,36 @@ Continue where you left off and finish the task.`,
     });
   });
 
+  it("infers a running state from recent user-terminal history after reload", () => {
+    const loadedAt = Date.parse("2024-01-01T00:30:00.000Z");
+    const lastUserAt = Date.parse("2024-01-01T00:29:30.000Z");
+    const patch = buildHistorySyncPatch({
+      messages: [
+        {
+          role: "user",
+          timestamp: new Date(lastUserAt).toISOString(),
+          content: "keep going",
+        },
+      ],
+      currentLines: [],
+      loadedAt,
+      status: "idle",
+      runId: null,
+    });
+
+    expect(patch).toEqual({
+      outputLines: ['[[meta]]{"role":"user","timestamp":1704068970000}', "> keep going"],
+      lastResult: null,
+      lastUserMessage: "keep going",
+      historyLoadedAt: loadedAt,
+      status: "running",
+      runId: null,
+      runStartedAt: lastUserAt,
+      streamText: null,
+      thinkingTrace: null,
+    });
+  });
+
   it("prefers canonical history when optimistic user content differs only by whitespace", () => {
     const patch = buildHistorySyncPatch({
       messages: [

@@ -20,7 +20,7 @@ import {
 } from "@/features/agents/state/transcript";
 
 export type AgentStatus = "idle" | "running" | "error";
-export type FocusFilter = "all" | "running" | "idle";
+export type FocusFilter = "all" | "running" | "approvals";
 
 export type AgentStoreSeed = {
   agentId: string;
@@ -526,8 +526,8 @@ export const getFilteredAgents = (state: AgentStoreState, filter: FocusFilter): 
       return sortAgents(state.agents, true);
     case "running":
       return sortAgents(state.agents.filter((agent) => agent.status === "running"), false);
-    case "idle":
-      return sortAgents(state.agents.filter((agent) => agent.status === "idle"), false);
+    case "approvals":
+      return sortAgents(state.agents.filter((agent) => agent.awaitingUserInput), false);
     default: {
       const _exhaustive: never = filter;
       void _exhaustive;

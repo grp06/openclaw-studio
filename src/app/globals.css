@@ -922,6 +922,25 @@ textarea:focus::-webkit-scrollbar {
   box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 24%, transparent);
 }
 
+.ui-segment-fleet-filter {
+  padding-left: 0;
+  padding-right: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ui-segment-fleet-filter .ui-segment-item {
+  border: 0;
+  box-shadow: none;
+}
+
+.ui-segment-fleet-filter .ui-segment-item[data-active="true"],
+.ui-segment-fleet-filter .ui-segment-item[aria-pressed="true"] {
+  border: 0;
+  box-shadow: none;
+}
+
 .ui-segment-command-mode .ui-segment-item {
   min-height: 2.125rem;
   border-color: color-mix(in oklch, var(--border) 68%, transparent);
@@ -960,6 +979,17 @@ textarea:focus::-webkit-scrollbar {
 .dark .ui-chat-scroll {
   border-color: color-mix(in oklch, var(--plane-workspace-border) 90%, var(--border));
   background: color-mix(in oklch, var(--surface-1) 95%, var(--surface-0));
+}
+
+.ui-chat-scroll-borderless {
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent;
+}
+
+.dark .ui-chat-scroll-borderless {
+  border: 0 !important;
+  background: transparent;
 }
 
 .ui-chat-user-card {
@@ -1262,6 +1292,13 @@ textarea:focus::-webkit-scrollbar {
   outline: none !important;
   outline-offset: 0;
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring) 20%, transparent) !important;
+}
+
+.chat-composer-input:focus,
+.chat-composer-input:focus-visible {
+  outline: none !important;
+  outline-offset: 0 !important;
+  box-shadow: none !important;
 }
 
 @keyframes fadeUp {

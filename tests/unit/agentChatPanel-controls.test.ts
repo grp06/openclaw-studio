@@ -71,8 +71,8 @@ describe("AgentChatPanel controls", () => {
       })
     );
 
-    expect(screen.getByText("Model")).toBeInTheDocument();
-    expect(screen.getByText("Thinking")).toBeInTheDocument();
+    expect(screen.getByLabelText("Model")).toBeInTheDocument();
+    expect(screen.getByLabelText("Thinking")).toBeInTheDocument();
     expect(screen.queryByDisplayValue("Agent One")).not.toBeInTheDocument();
     expect(screen.getByTestId("agent-rename-toggle")).toBeInTheDocument();
     expect(screen.getByLabelText("Rename agent")).toBeInTheDocument();
@@ -222,7 +222,7 @@ describe("AgentChatPanel controls", () => {
     expect(runningBadge).toBeNull();
   });
 
-  it("invokes_on_model_change_when_model_select_changes", () => {
+  it("invokes_on_model_change_when_model_select_changes_and_blurs_select", () => {
     const onModelChange = vi.fn();
     render(
       createElement(AgentChatPanel, {
@@ -242,10 +242,15 @@ describe("AgentChatPanel controls", () => {
       })
     );
 
-    fireEvent.change(screen.getByLabelText("Model"), {
+    const modelSelect = screen.getByLabelText("Model") as HTMLSelectElement;
+    modelSelect.focus();
+    expect(modelSelect).toHaveFocus();
+
+    fireEvent.change(modelSelect, {
       target: { value: "openai/gpt-5-mini" },
     });
     expect(onModelChange).toHaveBeenCalledWith("openai/gpt-5-mini");
+    expect(modelSelect).not.toHaveFocus();
   });
 
   it("invokes_on_thinking_change_when_thinking_select_changes", () => {

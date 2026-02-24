@@ -59,6 +59,24 @@ describe("studio settings normalization", () => {
     });
   });
 
+  it("normalizes_legacy_idle_filter_to_approvals", () => {
+    const normalized = normalizeStudioSettings({
+      focused: {
+        "ws://localhost:18789": {
+          mode: "focused",
+          selectedAgentId: "agent-1",
+          filter: "idle",
+        },
+      },
+    });
+
+    expect(normalized.focused["ws://localhost:18789"]).toEqual({
+      mode: "focused",
+      selectedAgentId: "agent-1",
+      filter: "approvals",
+    });
+  });
+
   it("merges_dual_mode_preferences", () => {
     const current = normalizeStudioSettings({
       focused: {
@@ -73,7 +91,7 @@ describe("studio settings normalization", () => {
     const merged = mergeStudioSettings(current, {
       focused: {
         "ws://localhost:18789": {
-          filter: "idle",
+          filter: "approvals",
         },
       },
     });
@@ -81,7 +99,7 @@ describe("studio settings normalization", () => {
     expect(merged.focused["ws://localhost:18789"]).toEqual({
       mode: "focused",
       selectedAgentId: "main",
-      filter: "idle",
+      filter: "approvals",
     });
   });
 

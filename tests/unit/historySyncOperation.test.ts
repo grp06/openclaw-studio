@@ -198,6 +198,53 @@ describe("historySyncOperation", () => {
     expect(patch.lastAppliedHistoryRequestId).toBe("req-3b");
   });
 
+  it("infers running state from recent user-terminal history in transcript-v2 mode", async () => {
+    const agent = createAgent({
+      status: "idle",
+      runId: null,
+      runStartedAt: null,
+      transcriptRevision: 1,
+      outputLines: [],
+    });
+    const loadedAt = Date.parse("2024-01-01T00:30:00.000Z");
+    const lastUserAt = Date.parse("2024-01-01T00:29:40.000Z");
+    const commands = await runHistorySyncOperation({
+      client: {
+        call: async <T>() =>
+          ({
+            sessionKey: agent.sessionKey,
+            messages: [
+              {
+                role: "user",
+                timestamp: new Date(lastUserAt).toISOString(),
+                content: "still working?",
+              },
+            ],
+          }) as T,
+      },
+      agentId: "agent-1",
+      getAgent: () => agent,
+      inFlightSessionKeys: new Set<string>(),
+      requestId: "req-3c",
+      loadedAt,
+      defaultLimit: 200,
+      maxLimit: 5000,
+      transcriptV2Enabled: true,
+    });
+
+    const updates = getCommandsByKind(commands, "dispatchUpdateAgent");
+    const finalUpdate = updates[updates.length - 1];
+    if (!finalUpdate) throw new Error("Expected final update command.");
+    const patch = finalUpdate.patch;
+    expect(patch.status).toBe("running");
+    expect(patch.runId).toBeNull();
+    expect(patch.runStartedAt).toBe(lastUserAt);
+    expect(patch.streamText).toBeNull();
+    expect(patch.thinkingTrace).toBeNull();
+    expect(patch.lastUserMessage).toBe("still working?");
+    expect(patch.lastAppliedHistoryRequestId).toBe("req-3c");
+  });
+
   it("returns legacy history sync patch command when transcript v2 is disabled", async () => {
     const agent = createAgent({
       transcriptRevision: 0,
