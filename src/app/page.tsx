@@ -10,6 +10,7 @@ import {
 } from "@/features/agents/components/AgentInspectPanels";
 import { FleetSidebar } from "@/features/agents/components/FleetSidebar";
 import { HeaderBar } from "@/features/agents/components/HeaderBar";
+import { FlowsSidebar } from "@/components/FlowsSidebar";
 import { ConnectionPanel } from "@/features/agents/components/ConnectionPanel";
 import { GatewayConnectScreen } from "@/features/agents/components/GatewayConnectScreen";
 import { EmptyStatePanel } from "@/features/agents/components/EmptyStatePanel";
@@ -243,6 +244,7 @@ const AgentStudioPage = () => {
   const [gatewayModelsError, setGatewayModelsError] = useState<string | null>(null);
   const [gatewayConfigSnapshot, setGatewayConfigSnapshot] =
     useState<GatewayModelPolicySnapshot | null>(null);
+  const [flowsSidebarOpen, setFlowsSidebarOpen] = useState(true);
   const [createAgentBusy, setCreateAgentBusy] = useState(false);
   const [createAgentModalOpen, setCreateAgentModalOpen] = useState(false);
   const [createAgentModalError, setCreateAgentModalError] = useState<string | null>(null);
@@ -1648,6 +1650,13 @@ const AgentStudioPage = () => {
           </div>
         </div>
       ) : null}
+
+      <FlowsSidebar
+        client={client}
+        gwStatus={status}
+        isOpen={flowsSidebarOpen}
+        onToggle={() => setFlowsSidebarOpen(v => !v)}
+      />
     </div>
   );
 };
