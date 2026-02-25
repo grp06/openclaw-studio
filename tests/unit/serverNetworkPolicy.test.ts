@@ -3,14 +3,22 @@
 import { describe, expect, it } from "vitest";
 
 describe("server network policy", () => {
-  it("defaults to loopback host", async () => {
-    const { resolveHost } = await import("../../server/network-policy");
+  it("defaults to dual loopback hosts", async () => {
+    const { resolveHosts, resolveHost } = await import("../../server/network-policy");
+    expect(resolveHosts({} as NodeJS.ProcessEnv)).toEqual(["127.0.0.1", "::1"]);
     expect(resolveHost({} as NodeJS.ProcessEnv)).toBe("127.0.0.1");
   });
 
   it("ignores HOSTNAME and uses only HOST for bind resolution", async () => {
-    const { resolveHost } = await import("../../server/network-policy");
+    const { resolveHosts, resolveHost } = await import("../../server/network-policy");
+    expect(resolveHosts({ HOSTNAME: "example-host" } as NodeJS.ProcessEnv)).toEqual([
+      "127.0.0.1",
+      "::1",
+    ]);
     expect(resolveHost({ HOSTNAME: "example-host" } as NodeJS.ProcessEnv)).toBe("127.0.0.1");
+    expect(resolveHosts({ HOST: "0.0.0.0", HOSTNAME: "example-host" } as NodeJS.ProcessEnv)).toEqual(
+      ["0.0.0.0"]
+    );
     expect(resolveHost({ HOST: "0.0.0.0", HOSTNAME: "example-host" } as NodeJS.ProcessEnv)).toBe(
       "0.0.0.0"
     );

@@ -23,10 +23,15 @@ const normalizeHost = (host) => {
   return raw;
 };
 
-const resolveHost = (env = process.env) => {
+const resolveHosts = (env = process.env) => {
   const host = String(env.HOST ?? "").trim();
-  if (host) return host;
-  return "127.0.0.1";
+  if (host) return [host];
+  return ["127.0.0.1", "::1"];
+};
+
+const resolveHost = (env = process.env) => {
+  const hosts = resolveHosts(env);
+  return hosts[0] ?? "127.0.0.1";
 };
 
 const isIpv4Loopback = (value) => value.startsWith("127.");
@@ -72,6 +77,7 @@ const assertPublicHostAllowed = ({ host, studioAccessToken }) => {
 };
 
 module.exports = {
+  resolveHosts,
   resolveHost,
   isPublicHost,
   assertPublicHostAllowed,
