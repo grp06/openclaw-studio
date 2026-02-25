@@ -183,7 +183,7 @@ describe("historyLifecycleWorkflow integration", () => {
       status: "idle",
       runId: null,
       outputLines: ["> question", "final answer", "final answer"],
-      transcriptRevision: 6,
+      transcriptRevision: 5,
     });
 
     const result = runPageHistoryAdapter({

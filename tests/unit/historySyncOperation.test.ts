@@ -278,7 +278,7 @@ describe("historySyncOperation", () => {
     expect(patch.lastAppliedHistoryRequestId).toBe("req-4");
   });
 
-  it("still applies history when transcript revision changes during fetch", async () => {
+  it("drops stale history when transcript revision changes during fetch", async () => {
     const requestAgent = createAgent({
       transcriptRevision: 7,
       outputLines: ["> local question", "assistant current"],
@@ -311,16 +311,31 @@ describe("historySyncOperation", () => {
     });
 
     const metrics = getCommandsByKind(commands, "logMetric");
-    expect(metrics).toEqual([]);
+    expect(metrics).toEqual([
+      {
+        kind: "logMetric",
+        metric: "history_response_dropped_stale",
+        meta: {
+          reason: "transcript_revision_changed",
+          agentId: "agent-1",
+          requestId: "req-5",
+        },
+      },
+    ]);
 
     const updates = getCommandsByKind(commands, "dispatchUpdateAgent");
+    expect(updates).toContainEqual({
+      kind: "dispatchUpdateAgent",
+      agentId: "agent-1",
+      patch: { lastHistoryRequestRevision: 7 },
+    });
     const finalUpdate = updates[updates.length - 1];
     if (!finalUpdate) throw new Error("Expected final update command.");
     const patch = finalUpdate.patch;
-    expect(patch.outputLines).toContain("> local question");
-    expect(patch.outputLines).toContain("assistant current");
-    expect(patch.outputLines).toContain("stale remote answer");
-    expect(patch.lastAppliedHistoryRequestId).toBe("req-5");
+    expect(patch).not.toHaveProperty("outputLines");
+    expect(patch).not.toHaveProperty("lastAppliedHistoryRequestId");
+    expect(patch).not.toHaveProperty("lastResult");
+    expect(patch).not.toHaveProperty("latestPreview");
     expect(inFlight.size).toBe(0);
   });
 });

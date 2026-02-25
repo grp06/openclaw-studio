@@ -449,4 +449,105 @@ describe("historySyncOperation integration", () => {
       )
     ).toHaveLength(1);
   });
+
+  it("drops stale history response when transcript revision changes after request", async () => {
+    const requestAgent: AgentState = {
+      agentId: "agent-1",
+      name: "Agent One",
+      sessionKey: "agent:agent-1:main",
+      status: "idle",
+      sessionCreated: true,
+      awaitingUserInput: false,
+      hasUnseenActivity: false,
+      outputLines: ["> local question", "assistant current"],
+      lastResult: "assistant current",
+      lastDiff: null,
+      runId: null,
+      runStartedAt: null,
+      streamText: null,
+      thinkingTrace: null,
+      latestOverride: null,
+      latestOverrideKind: null,
+      lastAssistantMessageAt: null,
+      lastActivityAt: null,
+      latestPreview: "assistant current",
+      lastUserMessage: "local question",
+      draft: "",
+      sessionSettingsSynced: true,
+      historyLoadedAt: null,
+      historyFetchLimit: null,
+      historyFetchedCount: null,
+      historyMaybeTruncated: false,
+      toolCallingEnabled: true,
+      showThinkingTraces: true,
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      avatarSeed: "seed-1",
+      avatarUrl: null,
+      transcriptEntries: [],
+      transcriptRevision: 7,
+      transcriptSequenceCounter: 0,
+      sessionEpoch: 0,
+    };
+    const latestAgent: AgentState = {
+      ...requestAgent,
+      transcriptRevision: 8,
+    };
+    let readCount = 0;
+    const inFlightSessionKeys = new Set<string>();
+    const commands = await runHistorySyncOperation({
+      client: {
+        call: async <T>() =>
+          ({
+            sessionKey: requestAgent.sessionKey,
+            messages: [{ role: "assistant", content: "stale remote answer" }],
+          }) as T,
+      },
+      agentId: requestAgent.agentId,
+      getAgent: () => {
+        readCount += 1;
+        return readCount <= 1 ? requestAgent : latestAgent;
+      },
+      inFlightSessionKeys,
+      requestId: "req-revision-drop-1",
+      loadedAt: 16_000,
+      defaultLimit: 200,
+      maxLimit: 5000,
+      transcriptV2Enabled: true,
+    });
+
+    const updates = commands.filter((entry) => entry.kind === "dispatchUpdateAgent");
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toEqual({
+      kind: "dispatchUpdateAgent",
+      agentId: "agent-1",
+      patch: { lastHistoryRequestRevision: 7 },
+    });
+
+    const staleDropMetrics = commands.filter(
+      (entry) => entry.kind === "logMetric" && entry.metric === "history_response_dropped_stale"
+    );
+    expect(staleDropMetrics).toEqual([
+      {
+        kind: "logMetric",
+        metric: "history_response_dropped_stale",
+        meta: {
+          reason: "transcript_revision_changed",
+          agentId: "agent-1",
+          requestId: "req-revision-drop-1",
+        },
+      },
+    ]);
+
+    expect(
+      updates.some((entry) => {
+        const patch = entry.patch;
+        return (
+          Object.prototype.hasOwnProperty.call(patch, "outputLines") ||
+          Object.prototype.hasOwnProperty.call(patch, "lastAppliedHistoryRequestId")
+        );
+      })
+    ).toBe(false);
+    expect(inFlightSessionKeys.size).toBe(0);
+  });
 });

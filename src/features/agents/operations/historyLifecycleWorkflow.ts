@@ -18,7 +18,10 @@ export type HistoryRequestIntent =
 export type HistoryResponseDisposition =
   | {
       kind: "drop";
-      reason: "session-key-changed" | "session-epoch-changed";
+      reason:
+        | "session-key-changed"
+        | "session-epoch-changed"
+        | "transcript-revision-changed";
     }
   | {
       kind: "apply";
@@ -85,6 +88,10 @@ export const resolveHistoryResponseDisposition = (params: {
   }
   if ((latest.sessionEpoch ?? 0) !== params.requestEpoch) {
     return { kind: "drop", reason: "session-epoch-changed" };
+  }
+  const latestRevision = latest.transcriptRevision ?? latest.outputLines.length;
+  if (latestRevision !== params.requestRevision) {
+    return { kind: "drop", reason: "transcript-revision-changed" };
   }
   return { kind: "apply" };
 };

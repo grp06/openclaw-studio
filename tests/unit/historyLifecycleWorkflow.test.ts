@@ -146,6 +146,30 @@ describe("historyLifecycleWorkflow", () => {
       kind: "drop",
       reason: "session-epoch-changed",
     });
+
+    expect(
+      resolveHistoryResponseDisposition({
+        latestAgent: createAgent({ transcriptRevision: 12 }),
+        expectedSessionKey: "agent:agent-1:main",
+        requestEpoch: 0,
+        requestRevision: 11,
+      })
+    ).toEqual({
+      kind: "drop",
+      reason: "transcript-revision-changed",
+    });
+
+    expect(
+      resolveHistoryResponseDisposition({
+        latestAgent: createAgent({ outputLines: ["one", "two"] }),
+        expectedSessionKey: "agent:agent-1:main",
+        requestEpoch: 0,
+        requestRevision: 1,
+      })
+    ).toEqual({
+      kind: "drop",
+      reason: "transcript-revision-changed",
+    });
   });
 
   it("applies history even while run is still active", () => {
@@ -174,6 +198,21 @@ describe("historyLifecycleWorkflow", () => {
         expectedSessionKey: "agent:agent-1:main",
         requestEpoch: 0,
         requestRevision: 9,
+      })
+    ).toEqual({
+      kind: "apply",
+    });
+
+    expect(
+      resolveHistoryResponseDisposition({
+        latestAgent: createAgent({
+          status: "idle",
+          runId: null,
+          outputLines: ["> q1", "a1"],
+        }),
+        expectedSessionKey: "agent:agent-1:main",
+        requestEpoch: 0,
+        requestRevision: 2,
       })
     ).toEqual({
       kind: "apply",
