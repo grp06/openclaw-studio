@@ -18,7 +18,9 @@ export const mergePendingLivePatch = (
   }
 
   if (incomingRunId && !existingRunId) {
-    const { streamText: _dropStreamText, thinkingTrace: _dropThinkingTrace, ...rest } = existing;
+    const rest = { ...existing };
+    delete rest.streamText;
+    delete rest.thinkingTrace;
     return { ...rest, ...incoming };
   }
 

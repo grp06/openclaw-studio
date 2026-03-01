@@ -301,8 +301,6 @@ export const AgentSettingsPanel = ({
   onUpdateAgentPermissions = () => {},
   onDelete,
   canDelete = true,
-  onToolCallingToggle,
-  onThinkingTracesToggle,
   cronJobs,
   cronLoading,
   cronError,
