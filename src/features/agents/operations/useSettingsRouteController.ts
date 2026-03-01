@@ -90,81 +90,101 @@ const executeSettingsRouteCommands = (
 export function useSettingsRouteController(
   params: UseSettingsRouteControllerParams
 ): SettingsRouteController {
+  const {
+    settingsRouteActive,
+    settingsRouteAgentId,
+    status,
+    agentsLoadedOnce,
+    selectedAgentId,
+    focusedAgentId,
+    personalityHasUnsavedChanges,
+    activeTab,
+    inspectSidebar,
+    agents,
+    flushPendingDraft,
+    dispatchSelectAgent,
+    setInspectSidebar,
+    setMobilePaneChat,
+    setPersonalityHasUnsavedChanges,
+    push,
+    replace,
+    confirmDiscard,
+  } = params;
   const applyCommands = useCallback(
     (commands: SettingsRouteNavCommand[]) => {
       executeSettingsRouteCommands(commands, {
-        dispatchSelectAgent: params.dispatchSelectAgent,
-        setInspectSidebar: params.setInspectSidebar,
-        setMobilePaneChat: params.setMobilePaneChat,
-        setPersonalityHasUnsavedChanges: params.setPersonalityHasUnsavedChanges,
-        flushPendingDraft: params.flushPendingDraft,
-        push: params.push,
-        replace: params.replace,
+        dispatchSelectAgent,
+        setInspectSidebar,
+        setMobilePaneChat,
+        setPersonalityHasUnsavedChanges,
+        flushPendingDraft,
+        push,
+        replace,
       });
     },
     [
-      params.dispatchSelectAgent,
-      params.flushPendingDraft,
-      params.push,
-      params.replace,
-      params.setInspectSidebar,
-      params.setMobilePaneChat,
-      params.setPersonalityHasUnsavedChanges,
+      dispatchSelectAgent,
+      flushPendingDraft,
+      push,
+      replace,
+      setInspectSidebar,
+      setMobilePaneChat,
+      setPersonalityHasUnsavedChanges,
     ]
   );
 
   const handleBackToChat = useCallback(() => {
     const needsDiscardConfirmation = shouldConfirmDiscardPersonalityChanges({
-      settingsRouteActive: params.settingsRouteActive,
-      activeTab: params.activeTab,
-      personalityHasUnsavedChanges: params.personalityHasUnsavedChanges,
+      settingsRouteActive,
+      activeTab,
+      personalityHasUnsavedChanges,
     });
-    const discardConfirmed = needsDiscardConfirmation ? params.confirmDiscard() : true;
+    const discardConfirmed = needsDiscardConfirmation ? confirmDiscard() : true;
     const commands = planBackToChatCommands({
-      settingsRouteActive: params.settingsRouteActive,
-      activeTab: params.activeTab,
-      personalityHasUnsavedChanges: params.personalityHasUnsavedChanges,
+      settingsRouteActive,
+      activeTab,
+      personalityHasUnsavedChanges,
       discardConfirmed,
     });
     applyCommands(commands);
   }, [
+    activeTab,
     applyCommands,
-    params.activeTab,
-    params.confirmDiscard,
-    params.personalityHasUnsavedChanges,
-    params.settingsRouteActive,
+    confirmDiscard,
+    personalityHasUnsavedChanges,
+    settingsRouteActive,
   ]);
 
   const handleSettingsRouteTabChange = useCallback(
     (nextTab: SettingsRouteTab) => {
-      const currentTab = params.inspectSidebar?.tab ?? "personality";
+      const currentTab = inspectSidebar?.tab ?? "personality";
       const needsDiscardConfirmation =
         currentTab === "personality" &&
         nextTab !== "personality" &&
         shouldConfirmDiscardPersonalityChanges({
-          settingsRouteActive: params.settingsRouteActive,
+          settingsRouteActive,
           activeTab: currentTab,
-          personalityHasUnsavedChanges: params.personalityHasUnsavedChanges,
+          personalityHasUnsavedChanges,
         });
-      const discardConfirmed = needsDiscardConfirmation ? params.confirmDiscard() : true;
+      const discardConfirmed = needsDiscardConfirmation ? confirmDiscard() : true;
 
       const commands = planSettingsTabChangeCommands({
         nextTab,
-        currentInspectSidebar: params.inspectSidebar,
-        settingsRouteAgentId: params.settingsRouteAgentId,
-        settingsRouteActive: params.settingsRouteActive,
-        personalityHasUnsavedChanges: params.personalityHasUnsavedChanges,
+        currentInspectSidebar: inspectSidebar,
+        settingsRouteAgentId,
+        settingsRouteActive,
+        personalityHasUnsavedChanges,
         discardConfirmed,
       });
       applyCommands(commands);
     },
     [
       applyCommands,
-      params.confirmDiscard,
-      params.inspectSidebar,
-      params.personalityHasUnsavedChanges,
-      params.settingsRouteActive,
-      params.settingsRouteAgentId,
+      confirmDiscard,
+      inspectSidebar,
+      personalityHasUnsavedChanges,
+      settingsRouteActive,
+      settingsRouteAgentId,
     ]
   );
 
@@ -172,79 +192,79 @@ export function useSettingsRouteController(
     (agentId: string) => {
       const commands = planOpenSettingsRouteCommands({
         agentId,
-        currentInspectSidebar: params.inspectSidebar,
-        focusedAgentId: params.focusedAgentId,
+        currentInspectSidebar: inspectSidebar,
+        focusedAgentId,
       });
       applyCommands(commands);
     },
-    [applyCommands, params.focusedAgentId, params.inspectSidebar]
+    [applyCommands, focusedAgentId, inspectSidebar]
   );
 
   const handleFleetSelectAgent = useCallback(
     (agentId: string) => {
       const commands = planFleetSelectCommands({
         agentId,
-        currentInspectSidebar: params.inspectSidebar,
-        focusedAgentId: params.focusedAgentId,
+        currentInspectSidebar: inspectSidebar,
+        focusedAgentId,
       });
       applyCommands(commands);
     },
-    [applyCommands, params.focusedAgentId, params.inspectSidebar]
+    [applyCommands, focusedAgentId, inspectSidebar]
   );
 
   useEffect(() => {
-    const routeAgentId = (params.settingsRouteAgentId ?? "").trim();
+    const routeAgentId = (settingsRouteAgentId ?? "").trim();
     const hasRouteAgent = routeAgentId
-      ? params.agents.some((agent) => agent.agentId === routeAgentId)
+      ? agents.some((agent) => agent.agentId === routeAgentId)
       : false;
 
     const commands = planSettingsRouteSyncCommands({
-      settingsRouteActive: params.settingsRouteActive,
-      settingsRouteAgentId: params.settingsRouteAgentId,
-      status: params.status,
-      agentsLoadedOnce: params.agentsLoadedOnce,
-      selectedAgentId: params.selectedAgentId,
+      settingsRouteActive,
+      settingsRouteAgentId,
+      status,
+      agentsLoadedOnce,
+      selectedAgentId,
       hasRouteAgent,
-      currentInspectSidebar: params.inspectSidebar,
+      currentInspectSidebar: inspectSidebar,
     });
 
     applyCommands(commands);
   }, [
+    agents,
+    agentsLoadedOnce,
     applyCommands,
-    params.agents,
-    params.agentsLoadedOnce,
-    params.inspectSidebar,
-    params.selectedAgentId,
-    params.settingsRouteActive,
-    params.settingsRouteAgentId,
-    params.status,
+    inspectSidebar,
+    selectedAgentId,
+    settingsRouteActive,
+    settingsRouteAgentId,
+    status,
   ]);
 
   useEffect(() => {
-    const hasSelectedAgentInAgents = params.selectedAgentId
-      ? params.agents.some((agent) => agent.agentId === params.selectedAgentId)
+    const hasSelectedAgentInAgents = selectedAgentId
+      ? agents.some((agent) => agent.agentId === selectedAgentId)
       : false;
-    const hasInspectSidebarAgent = params.inspectSidebar?.agentId
-      ? params.agents.some((agent) => agent.agentId === params.inspectSidebar?.agentId)
+    const hasInspectSidebarAgent = inspectSidebar?.agentId
+      ? agents.some((agent) => agent.agentId === inspectSidebar?.agentId)
       : false;
 
     const commands = planNonRouteSelectionSyncCommands({
-      settingsRouteActive: params.settingsRouteActive,
-      selectedAgentId: params.selectedAgentId,
-      focusedAgentId: params.focusedAgentId,
+      settingsRouteActive,
+      selectedAgentId,
+      focusedAgentId,
       hasSelectedAgentInAgents,
-      currentInspectSidebar: params.inspectSidebar,
+      currentInspectSidebar: inspectSidebar,
       hasInspectSidebarAgent,
     });
 
     applyCommands(commands);
   }, [
+    agents,
     applyCommands,
-    params.agents,
-    params.focusedAgentId,
-    params.inspectSidebar,
-    params.selectedAgentId,
-    params.settingsRouteActive,
+    focusedAgentId,
+    inspectSidebar,
+    selectedAgentId,
+    settingsRouteActive,
   ]);
 
   return {

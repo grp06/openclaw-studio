@@ -78,6 +78,7 @@ export type UseAgentSettingsMutationControllerParams = {
 };
 
 export function useAgentSettingsMutationController(params: UseAgentSettingsMutationControllerParams) {
+  const { agents, loadAgents, setMobilePaneChat, status } = params;
   const skillsLoadRequestIdRef = useRef(0);
   const [settingsSkillsReport, setSettingsSkillsReport] = useState<SkillStatusReport | null>(null);
   const [settingsSkillsLoading, setSettingsSkillsLoading] = useState(false);
@@ -384,21 +385,21 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
     if (!restartingMutationBlock) return;
     if (restartingMutationBlock.kind !== "delete-agent") return;
     if (restartingMutationBlock.phase !== "awaiting-restart") return;
-    if (params.status !== "connected") return;
+    if (status !== "connected") return;
 
-    const deletedAgentStillPresent = params.agents.some(
+    const deletedAgentStillPresent = agents.some(
       (entry) => entry.agentId === restartingMutationBlock.agentId
     );
     if (!deletedAgentStillPresent) {
       setRestartingMutationBlock(null);
-      params.setMobilePaneChat();
+      setMobilePaneChat();
       return;
     }
 
     let cancelled = false;
     const refreshAgents = async () => {
       try {
-        await params.loadAgents();
+        await loadAgents();
       } catch (error) {
         if (!isGatewayDisconnectLikeError(error)) {
           console.error("Failed to refresh agents while awaiting delete restart.", error);
@@ -417,10 +418,10 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
       window.clearInterval(intervalId);
     };
   }, [
-    params.agents,
-    params.loadAgents,
-    params.setMobilePaneChat,
-    params.status,
+    agents,
+    loadAgents,
+    setMobilePaneChat,
+    status,
     restartingMutationBlock,
   ]);
 
