@@ -22,7 +22,8 @@ import {
   type RuntimeCoordinatorDispatchAction,
   type RuntimeCoordinatorEffectCommand,
 } from "@/features/agents/state/runtimeEventCoordinatorWorkflow";
-import { type EventFrame, isSameSessionKey } from "@/lib/gateway/GatewayClient";
+import type { EventFrame } from "@/lib/gateway/GatewayClient";
+import { isSameSessionKey } from "@/lib/gateway/session-keys";
 import { normalizeAssistantDisplayText } from "@/lib/text/assistantText";
 import {
   extractText,

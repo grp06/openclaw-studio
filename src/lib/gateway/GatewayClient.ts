@@ -14,6 +14,11 @@ import type { StudioSettingsResponse } from "@/lib/studio/coordinator";
 import { resolveStudioProxyGatewayUrl } from "@/lib/gateway/proxy-url";
 import { ensureGatewayReloadModeHotForLocalStudio } from "@/lib/gateway/gatewayReloadMode";
 import { GatewayResponseError } from "@/lib/gateway/errors";
+import {
+  buildAgentMainSessionKey,
+  parseAgentIdFromSessionKey,
+  isSameSessionKey,
+} from "@/lib/gateway/session-keys";
 
 type ReqFrame = {
   type: "req";
@@ -59,22 +64,7 @@ export const parseGatewayFrame = (raw: string): GatewayFrame | null => {
   }
 };
 
-export const buildAgentMainSessionKey = (agentId: string, mainKey: string) => {
-  const trimmedAgent = agentId.trim();
-  const trimmedKey = mainKey.trim() || "main";
-  return `agent:${trimmedAgent}:${trimmedKey}`;
-};
-
-export const parseAgentIdFromSessionKey = (sessionKey: string): string | null => {
-  const match = sessionKey.match(/^agent:([^:]+):/);
-  return match ? match[1] : null;
-};
-
-export const isSameSessionKey = (a: string, b: string) => {
-  const left = a.trim();
-  const right = b.trim();
-  return left.length > 0 && left === right;
-};
+export { buildAgentMainSessionKey, parseAgentIdFromSessionKey, isSameSessionKey };
 
 const CONNECT_FAILED_CLOSE_CODE = 4008;
 

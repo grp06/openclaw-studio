@@ -1,4 +1,4 @@
-import { parseAgentIdFromSessionKey } from "@/lib/gateway/GatewayClient";
+import { parseAgentIdFromSessionKey } from "@/lib/gateway/session-keys";
 
 type LatestUpdateKind = "heartbeat" | "cron" | null;
 

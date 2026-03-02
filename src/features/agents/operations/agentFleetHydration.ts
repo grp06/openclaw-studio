@@ -1,4 +1,4 @@
-import { buildAgentMainSessionKey, isSameSessionKey } from "@/lib/gateway/GatewayClient";
+import { buildAgentMainSessionKey, isSameSessionKey } from "@/lib/gateway/session-keys";
 import { type GatewayModelPolicySnapshot } from "@/lib/gateway/models";
 import { type StudioSettings } from "@/lib/studio/settings";
 import {
