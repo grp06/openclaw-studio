@@ -6,8 +6,14 @@ export const deriveControlPlaneEventKey = (event: ControlPlaneDomainEvent): stri
   if (event.type === "runtime.status") {
     return ["runtime.status", event.status, safeString(event.reason), event.asOf].join(":");
   }
+  const connectionEpoch = safeString(event.connectionEpoch).trim();
   if (typeof event.seq === "number" && Number.isFinite(event.seq)) {
-    return ["gateway.event", event.event, "seq", String(event.seq)].join(":");
+    if (connectionEpoch) {
+      return ["gateway.event", event.event, "epoch", connectionEpoch, "seq", String(event.seq)].join(
+        ":"
+      );
+    }
+    return ["gateway.event", event.event, "seq", String(event.seq), safeString(event.asOf)].join(":");
   }
-  return ["gateway.event", event.event, "", event.asOf].join(":");
+  return ["gateway.event", event.event, connectionEpoch, event.asOf].join(":");
 };

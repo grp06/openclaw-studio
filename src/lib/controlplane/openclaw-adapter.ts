@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { WebSocket } from "ws";
 
 import type {
@@ -14,21 +16,22 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const INITIAL_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 15_000;
 const CONNECT_PROTOCOL = 3;
+const CONNECT_CLIENT_ID = "gateway-client";
+const CONNECT_CLIENT_MODE = "backend";
 
 const DEFAULT_METHOD_ALLOWLIST = new Set<string>([
   "status",
   "chat.send",
   "chat.abort",
+  "agents.create",
   "agents.update",
   "agents.delete",
   "agents.list",
-  "agents.create",
   "sessions.list",
   "sessions.preview",
   "sessions.patch",
   "sessions.reset",
   "config.get",
-  "config.patch",
   "config.set",
   "exec.approval.resolve",
   "exec.approvals.get",
@@ -100,6 +103,7 @@ export class OpenClawGatewayAdapter {
   private reconnectAttempt = 0;
   private stopping = false;
   private nextRequestNumber = 1;
+  private connectionEpoch: string | null = null;
   private pending = new Map<string, PendingRequest>();
   private loadSettings: () => ControlPlaneGatewaySettings;
   private createWebSocket: (url: string, opts: { origin: string }) => WebSocket;
@@ -145,6 +149,7 @@ export class OpenClawGatewayAdapter {
     const ws = this.ws;
     this.ws = null;
     this.connectRequestId = null;
+    this.connectionEpoch = null;
     if (ws && ws.readyState === WebSocket.OPEN) {
       await new Promise<void>((resolve) => {
         ws.once("close", () => resolve());
@@ -194,6 +199,7 @@ export class OpenClawGatewayAdapter {
 
   private async connect(): Promise<void> {
     const settings = this.loadSettings();
+    this.connectionEpoch = randomUUID();
     const ws = this.createWebSocket(settings.url, { origin: resolveOriginForUpstream(settings.url) });
     this.ws = ws;
     this.connectRequestId = null;
@@ -230,6 +236,7 @@ export class OpenClawGatewayAdapter {
             type: "gateway.event",
             event: parsed.event,
             seq: typeof parsed.seq === "number" ? parsed.seq : null,
+            connectionEpoch: this.connectionEpoch,
             payload: parsed.payload,
             asOf: new Date().toISOString(),
           });
@@ -258,6 +265,8 @@ export class OpenClawGatewayAdapter {
           settle(() => reject(new Error("Control-plane gateway connection closed during connect.")));
           return;
         }
+        this.rejectPending("Control-plane gateway connection closed.");
+        this.connectionEpoch = null;
         this.updateStatus("reconnecting", "gateway_closed");
         this.scheduleReconnect();
       });
@@ -269,6 +278,7 @@ export class OpenClawGatewayAdapter {
         }
       });
     }).catch((err) => {
+      this.connectionEpoch = null;
       this.updateStatus("error", err instanceof Error ? err.message : "connect_error");
       this.scheduleReconnect();
       throw err;
@@ -294,27 +304,38 @@ export class OpenClawGatewayAdapter {
     if (!ws || ws.readyState !== WebSocket.OPEN || this.connectRequestId) return;
     const id = String(this.nextRequestNumber++);
     this.connectRequestId = id;
-    ws.send(
-      JSON.stringify({
-        type: "req",
-        id,
-        method: "connect",
-        params: {
-          minProtocol: CONNECT_PROTOCOL,
-          maxProtocol: CONNECT_PROTOCOL,
-          client: {
-            id: "openclaw-studio-controlplane",
-            version: "dev",
-            platform: "node",
-            mode: "operator",
+    try {
+      ws.send(
+        JSON.stringify({
+          type: "req",
+          id,
+          method: "connect",
+          params: {
+            minProtocol: CONNECT_PROTOCOL,
+            maxProtocol: CONNECT_PROTOCOL,
+            client: {
+              id: CONNECT_CLIENT_ID,
+              version: "dev",
+              platform: "node",
+              mode: CONNECT_CLIENT_MODE,
+            },
+            role: "operator",
+            scopes: ["operator.admin", "operator.approvals", "operator.pairing"],
+            caps: [],
+            auth: { token },
           },
-          role: "operator",
-          scopes: ["operator.admin", "operator.approvals", "operator.pairing"],
-          caps: [],
-          auth: { token },
-        },
-      })
-    );
+        })
+      );
+    } catch (err) {
+      this.connectRequestId = null;
+      const reason = err instanceof Error ? err.message : "connect_send_failed";
+      this.updateStatus("error", reason);
+      try {
+        ws.close(1011, "connect send failed");
+      } catch (closeErr) {
+        console.error("Failed to close gateway socket after connect-send failure.", closeErr);
+      }
+    }
   }
 
   private parseFrame(raw: string): GatewayEventFrame | GatewayResponseFrame | null {

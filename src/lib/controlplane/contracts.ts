@@ -16,6 +16,7 @@ export type ControlPlaneDomainEvent =
       type: "gateway.event";
       event: string;
       seq: number | null;
+      connectionEpoch?: string | null;
       payload: unknown;
       asOf: string;
     };
