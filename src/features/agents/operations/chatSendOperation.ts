@@ -1,7 +1,7 @@
 import {
-  isWebchatSessionMutationBlockedError,
   type GatewayClient,
 } from "@/lib/gateway/GatewayClient";
+import { isWebchatSessionMutationBlockedError } from "@/lib/gateway/gateway-disconnect";
 import {
   buildAgentInstruction,
   isMetaMarkdown,
@@ -25,7 +25,7 @@ type GatewayClientLike = {
   call: (method: string, params: unknown) => Promise<unknown>;
 };
 
-export type ChatSendOperationResult = {
+type ChatSendOperationResult = {
   ok: boolean;
 };
 
