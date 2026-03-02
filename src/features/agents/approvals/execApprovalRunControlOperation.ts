@@ -13,9 +13,8 @@ import {
   planPauseRunControl,
 } from "@/features/agents/approvals/execApprovalRunControlWorkflow";
 import { sendChatMessageViaStudio } from "@/features/agents/operations/chatSendOperation";
+import type { RuntimeWriteTransport } from "@/features/agents/operations/runtimeWriteTransport";
 import type { AgentState } from "@/features/agents/state/store";
-import { isStudioDomainIntentModeEnabled } from "@/lib/controlplane/domain-mode";
-import { postStudioIntent } from "@/lib/controlplane/intents-client";
 import type { EventFrame } from "@/lib/gateway/GatewayClient";
 import { EXEC_APPROVAL_AUTO_RESUME_MARKER } from "@/lib/text/message-extract";
 
@@ -37,7 +36,7 @@ export const EXEC_APPROVAL_AUTO_RESUME_WAIT_TIMEOUT_MS = 3_000;
 
 export async function runPauseRunForExecApprovalOperation(params: {
   status: string;
-  client: GatewayClientLike;
+  runtimeWriteTransport: RuntimeWriteTransport;
   approval: PendingExecApproval;
   preferredAgentId?: string | null;
   getAgents: () => AgentState[];
@@ -45,8 +44,9 @@ export async function runPauseRunForExecApprovalOperation(params: {
   isDisconnectLikeError: (error: unknown) => boolean;
   logWarn?: (message: string, error: unknown) => void;
 }): Promise<void> {
-  if (params.status !== "connected") return;
-  const useDomainIntents = isStudioDomainIntentModeEnabled();
+  const canPause =
+    params.status === "connected" || params.runtimeWriteTransport.useDomainIntents === true;
+  if (!canPause) return;
 
   const plan = planPauseRunControl({
     approval: params.approval,
@@ -63,15 +63,9 @@ export async function runPauseRunForExecApprovalOperation(params: {
 
   params.pausedRunIdByAgentId.set(plan.pauseIntent.agentId, plan.pauseIntent.runId);
   try {
-    if (useDomainIntents) {
-      await postStudioIntent("/api/intents/chat-abort", {
-        sessionKey: plan.pauseIntent.sessionKey,
-      });
-    } else {
-      await params.client.call("chat.abort", {
-        sessionKey: plan.pauseIntent.sessionKey,
-      });
-    }
+    await params.runtimeWriteTransport.chatAbort({
+      sessionKey: plan.pauseIntent.sessionKey,
+    });
   } catch (error) {
     params.pausedRunIdByAgentId.delete(plan.pauseIntent.agentId);
     if (!params.isDisconnectLikeError(error)) {
@@ -85,6 +79,7 @@ export async function runPauseRunForExecApprovalOperation(params: {
 
 export async function runExecApprovalAutoResumeOperation(params: {
   client: GatewayClientLike;
+  runtimeWriteTransport: RuntimeWriteTransport;
   dispatch: RunControlDispatch;
   approval: PendingExecApproval;
   targetAgentId: string;
@@ -97,13 +92,12 @@ export async function runExecApprovalAutoResumeOperation(params: {
   sendChatMessage?: typeof sendChatMessageViaStudio;
   now?: () => number;
 }): Promise<void> {
-  const useDomainIntents = isStudioDomainIntentModeEnabled();
   const sendChatMessage = params.sendChatMessage ?? sendChatMessageViaStudio;
-  const pendingState = params.getPendingState();
+  const preWaitPendingState = params.getPendingState();
   const prePlan = planAutoResumeRunControl({
     approval: params.approval,
     targetAgentId: params.targetAgentId,
-    pendingState,
+    pendingState: preWaitPendingState,
     pausedRunIdByAgentId: params.pausedRunIdByAgentId,
     agents: params.getAgents(),
   });
@@ -124,30 +118,25 @@ export async function runExecApprovalAutoResumeOperation(params: {
   });
 
   try {
-    if (useDomainIntents) {
-      await postStudioIntent("/api/intents/agent-wait", {
-        runId: preWaitIntent.pausedRunId,
-        timeoutMs: EXEC_APPROVAL_AUTO_RESUME_WAIT_TIMEOUT_MS,
-      });
-    } else {
-      await params.client.call("agent.wait", {
-        runId: preWaitIntent.pausedRunId,
-        timeoutMs: EXEC_APPROVAL_AUTO_RESUME_WAIT_TIMEOUT_MS,
-      });
-    }
+    await params.runtimeWriteTransport.agentWait({
+      runId: preWaitIntent.pausedRunId,
+      timeoutMs: EXEC_APPROVAL_AUTO_RESUME_WAIT_TIMEOUT_MS,
+    });
   } catch (error) {
-    if (!params.isDisconnectLikeError(error)) {
-      (params.logWarn ?? ((message, err) => console.warn(message, err)))(
-        "Failed waiting for paused run before auto-resume.",
-        error
-      );
+    if (params.isDisconnectLikeError(error)) {
+      return;
     }
+    (params.logWarn ?? ((message, err) => console.warn(message, err)))(
+      "Failed waiting for paused run before auto-resume.",
+      error
+    );
   }
 
+  const postWaitPendingState = params.getPendingState();
   const postPlan = planAutoResumeRunControl({
     approval: params.approval,
     targetAgentId: preWaitIntent.targetAgentId,
-    pendingState,
+    pendingState: postWaitPendingState,
     pausedRunIdByAgentId: new Map([[preWaitIntent.targetAgentId, preWaitIntent.pausedRunId]]),
     agents: params.getAgents(),
   });
@@ -157,6 +146,7 @@ export async function runExecApprovalAutoResumeOperation(params: {
 
   await sendChatMessage({
     client: params.client,
+    runtimeWriteTransport: params.runtimeWriteTransport,
     dispatch: params.dispatch,
     getAgent: (agentId) => params.getAgents().find((entry) => entry.agentId === agentId) ?? null,
     agentId: postPlan.postWaitIntent.targetAgentId,
@@ -169,6 +159,7 @@ export async function runExecApprovalAutoResumeOperation(params: {
 
 export async function runResolveExecApprovalOperation(params: {
   client: GatewayClientLike;
+  runtimeWriteTransport: RuntimeWriteTransport;
   approvalId: string;
   decision: ExecApprovalDecision;
   getAgents: () => AgentState[];
@@ -188,7 +179,7 @@ export async function runResolveExecApprovalOperation(params: {
   const runAutoResume = params.runAutoResume ?? runExecApprovalAutoResumeOperation;
 
   await resolveExecApproval({
-    client: params.client,
+    runtimeWriteTransport: params.runtimeWriteTransport,
     approvalId: params.approvalId,
     decision: params.decision,
     getAgents: params.getAgents,
@@ -201,6 +192,7 @@ export async function runResolveExecApprovalOperation(params: {
     onAllowed: async ({ approval, targetAgentId }) => {
       await runAutoResume({
         client: params.client,
+        runtimeWriteTransport: params.runtimeWriteTransport,
         dispatch: params.dispatch,
         approval,
         targetAgentId,

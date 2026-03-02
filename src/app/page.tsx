@@ -20,6 +20,7 @@ import {
   useGatewayConnection,
   type GatewayStatus,
 } from "@/lib/gateway/GatewayClient";
+import type { ControlPlaneOutboxEntry } from "@/lib/controlplane/contracts";
 import {
   type GatewayModelChoice,
   type GatewayModelPolicySnapshot,
@@ -40,7 +41,6 @@ import {
   resolveLatestCronJobForAgent,
 } from "@/lib/cron/types";
 import {
-  createGatewayAgent,
   readConfigAgentList,
   resolveDefaultConfigAgentId,
   slugifyAgentName,
@@ -104,6 +104,7 @@ import {
   type CreateAgentBlockState,
 } from "@/features/agents/operations/mutationLifecycleWorkflow";
 import { useAgentSettingsMutationController } from "@/features/agents/operations/useAgentSettingsMutationController";
+import { createRuntimeWriteTransport } from "@/features/agents/operations/runtimeWriteTransport";
 import { useRuntimeSyncController } from "@/features/agents/operations/useRuntimeSyncController";
 import { useChatInteractionController } from "@/features/agents/operations/useChatInteractionController";
 import {
@@ -114,7 +115,6 @@ import {
   type SettingsRouteTab,
 } from "@/features/agents/operations/settingsRouteWorkflow";
 import { useSettingsRouteController } from "@/features/agents/operations/useSettingsRouteController";
-import { isStudioDomainIntentModeEnabled } from "@/lib/controlplane/domain-mode";
 const PENDING_EXEC_APPROVAL_PRUNE_GRACE_MS = 500;
 
 type MobilePane = "fleet" | "chat";
@@ -228,9 +228,17 @@ const AgentStudioPage = () => {
     setGatewayUrl,
     setToken,
   } = useGatewayConnection(settingsCoordinator);
-  const useDomainApiMode = domainApiModeEnabled ?? isStudioDomainIntentModeEnabled();
+  const useDomainApiMode = domainApiModeEnabled === true;
   const coreConnected = useDomainApiMode ? true : status === "connected";
   const coreStatus: GatewayStatus = coreConnected ? "connected" : status;
+  const runtimeWriteTransport = useMemo(
+    () =>
+      createRuntimeWriteTransport({
+        client,
+        useDomainIntents: useDomainApiMode,
+      }),
+    [client, useDomainApiMode]
+  );
 
   const { state, dispatch, hydrateAgents, setError, setLoading } = useAgentStore();
   const [showConnectionPanel, setShowConnectionPanel] = useState(false);
@@ -277,6 +285,8 @@ const AgentStudioPage = () => {
     }) => Promise<void>
   >((input) => Promise.reject(new Error(`Config mutation queue not ready for "${input.kind}".`)));
   const approvalPausedRunIdByAgentRef = useRef<Map<string, string>>(new Map());
+  const domainEventIngressRef = useRef<(event: EventFrame) => void>(() => {});
+  const pendingDomainOutboxEntriesRef = useRef<ControlPlaneOutboxEntry[]>([]);
 
   const agents = state.agents;
   const selectedAgent = useMemo(() => getSelectedAgent(state), [state]);
@@ -472,6 +482,7 @@ const AgentStudioPage = () => {
         isDisconnectLikeError: isGatewayDisconnectLikeError,
         preferredSelectedAgentId: preferredSelectedAgentIdRef.current,
         hasCurrentSelection: Boolean(stateRef.current.selectedAgentId),
+        useDomainApiMode,
         logError: (message, error) => console.error(message, error),
       });
       executeStudioBootstrapLoadCommands({
@@ -497,6 +508,7 @@ const AgentStudioPage = () => {
     gatewayConfigSnapshot,
     settingsCoordinator,
     coreConnected,
+    useDomainApiMode,
   ]);
 
   const enqueueConfigMutationFromRef = useCallback(
@@ -522,6 +534,7 @@ const AgentStudioPage = () => {
 
   const settingsMutationController = useAgentSettingsMutationController({
     client,
+    runtimeWriteTransport,
     status,
     isLocalGateway,
     agents,
@@ -553,6 +566,7 @@ const AgentStudioPage = () => {
       setMobilePane("chat");
     },
     setError,
+    useDomainIntents: useDomainApiMode,
   });
 
   const hasRenameMutationBlock = settingsMutationController.hasRenameMutationBlock;
@@ -742,6 +756,31 @@ const AgentStudioPage = () => {
     }
   }, [agents, heartbeatTick, specialLatestUpdate]);
 
+  const ingestDomainOutboxEntries = useCallback((entries: ControlPlaneOutboxEntry[]) => {
+    if (!Array.isArray(entries) || entries.length === 0) return;
+    const handler = runtimeEventHandlerRef.current;
+    const ingestEvent = domainEventIngressRef.current;
+    if (!handler) {
+      pendingDomainOutboxEntriesRef.current.push(...entries);
+      const overflow = pendingDomainOutboxEntriesRef.current.length - 5_000;
+      if (overflow > 0) {
+        pendingDomainOutboxEntriesRef.current.splice(0, overflow);
+      }
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.event.type !== "gateway.event") continue;
+      const frame: EventFrame = {
+        type: "event",
+        event: entry.event.event,
+        payload: entry.event.payload,
+        ...(typeof entry.event.seq === "number" ? { seq: entry.event.seq } : {}),
+      };
+      handler.handleEvent(frame);
+      ingestEvent(frame);
+    }
+  }, []);
+
   const {
     loadSummarySnapshot,
     loadAgentHistory,
@@ -758,6 +797,8 @@ const AgentStudioPage = () => {
       runtimeEventHandlerRef.current?.clearRunTracking(runId);
     },
     isDisconnectLikeError: isGatewayDisconnectLikeError,
+    useDomainApiReads: useDomainApiMode,
+    ingestDomainOutboxEntries,
   });
 
   const {
@@ -772,6 +813,7 @@ const AgentStudioPage = () => {
     clearPendingLivePatch,
   } = useChatInteractionController({
     client,
+    runtimeWriteTransport,
     status: coreStatus,
     agents,
     dispatch,
@@ -876,7 +918,7 @@ const AgentStudioPage = () => {
       await runCreateAgentMutationLifecycle(
         {
           payload,
-          status,
+          status: coreStatus,
           hasCreateBlock: Boolean(createAgentBlock),
           hasRenameBlock: hasRenameMutationBlock,
           hasDeleteBlock: hasDeleteMutationBlock,
@@ -885,7 +927,7 @@ const AgentStudioPage = () => {
         {
           enqueueConfigMutation,
           createAgent: async (name, avatarSeed) => {
-            const created = await createGatewayAgent({ client, name });
+            const created = await runtimeWriteTransport.agentCreate({ name });
             if (avatarSeed) {
               persistAvatarSeed(created.id, avatarSeed);
             }
@@ -924,6 +966,7 @@ const AgentStudioPage = () => {
               applyDefaultPermissions: async ({ agentId, sessionKey }) => {
                 await applyCreateAgentBootstrapPermissions({
                   client,
+                  runtimeWriteTransport,
                   agentId,
                   sessionKey,
                   draft: { ...CREATE_AGENT_DEFAULT_PERMISSIONS },
@@ -974,8 +1017,9 @@ const AgentStudioPage = () => {
       loadAgents,
       persistAvatarSeed,
       refreshGatewayConfigSnapshot,
+      runtimeWriteTransport,
       setError,
-      status,
+      coreStatus,
     ]
   );
 
@@ -1027,13 +1071,14 @@ const AgentStudioPage = () => {
         agents: stateRef.current.agents,
         dispatch,
         client,
+        runtimeWriteTransport,
         agentId,
         sessionKey,
         field,
         value,
       });
     },
-    [client, dispatch]
+    [client, dispatch, runtimeWriteTransport]
   );
 
   const handleModelChange = useCallback(
@@ -1077,6 +1122,7 @@ const AgentStudioPage = () => {
     async (approvalId: string, decision: ExecApprovalDecision) => {
       await runResolveExecApprovalOperation({
         client,
+        runtimeWriteTransport,
         approvalId,
         decision,
         getAgents: () => stateRef.current.agents,
@@ -1106,14 +1152,14 @@ const AgentStudioPage = () => {
         clearRunTracking: (runId) => runtimeEventHandlerRef.current?.clearRunTracking(runId),
       });
     },
-    [client, dispatch, loadAgentHistory]
+    [client, dispatch, loadAgentHistory, runtimeWriteTransport]
   );
 
   const pauseRunForExecApproval = useCallback(
     async (approval: PendingExecApproval, preferredAgentId?: string | null) => {
       await runPauseRunForExecApprovalOperation({
-        status,
-        client,
+        status: coreStatus,
+        runtimeWriteTransport,
         approval,
         preferredAgentId: preferredAgentId ?? null,
         getAgents: () => stateRef.current.agents,
@@ -1122,7 +1168,7 @@ const AgentStudioPage = () => {
         logWarn: (message, error) => console.warn(message, error),
       });
     },
-    [client, status]
+    [coreStatus, runtimeWriteTransport]
   );
 
   const handleGatewayEventIngress = useCallback(
@@ -1163,10 +1209,11 @@ const AgentStudioPage = () => {
     },
     [dispatch, pauseRunForExecApproval]
   );
+  domainEventIngressRef.current = handleGatewayEventIngress;
 
   useEffect(() => {
     const handler = createGatewayRuntimeEventHandler({
-      getStatus: () => status,
+      getStatus: () => coreStatus,
       getAgents: () => stateRef.current.agents,
       dispatch,
       queueLivePatch,
@@ -1191,6 +1238,11 @@ const AgentStudioPage = () => {
       },
     });
     runtimeEventHandlerRef.current = handler;
+    if (pendingDomainOutboxEntriesRef.current.length > 0) {
+      const pendingEntries = pendingDomainOutboxEntriesRef.current;
+      pendingDomainOutboxEntriesRef.current = [];
+      ingestDomainOutboxEntries(pendingEntries);
+    }
     let unsubscribeGatewayEvents: (() => void) | null = null;
     let stream: EventSource | null = null;
     if (useDomainApiMode) {
@@ -1242,8 +1294,9 @@ const AgentStudioPage = () => {
     refreshHeartbeatLatestUpdate,
     specialLatestUpdate,
     handleGatewayEventIngress,
+    ingestDomainOutboxEntries,
     useDomainApiMode,
-    status,
+    coreStatus,
   ]);
 
   const handleAvatarShuffle = useCallback(
@@ -1314,7 +1367,7 @@ const AgentStudioPage = () => {
     }
   }, [gatewayError]);
 
-  if (!agentsLoadedOnce && (!didAttemptGatewayConnect || status === "connecting")) {
+  if (!agentsLoadedOnce && !coreConnected && (!didAttemptGatewayConnect || status === "connecting")) {
     return (
       <div className="relative min-h-screen w-screen overflow-hidden bg-background">
         <div className="flex min-h-screen items-center justify-center px-6">

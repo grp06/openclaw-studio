@@ -485,4 +485,33 @@ describe("execApprovalRunControlOperation", () => {
     expect(call).not.toHaveBeenCalledWith("chat.abort", expect.anything());
     expect(call).not.toHaveBeenCalledWith("agent.wait", expect.anything());
   });
+
+  it("pauses in domain mode when status is disconnected", async () => {
+    process.env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE = "true";
+    mockedPostStudioIntent.mockReset();
+    mockedPostStudioIntent.mockResolvedValue({ ok: true });
+    const call = vi.fn(async () => ({ ok: true }));
+    const pausedRunIdByAgentId = new Map<string, string>();
+
+    await runPauseRunForExecApprovalOperation({
+      status: "disconnected",
+      runtimeWriteTransport: createRuntimeWriteTransport({
+        client: { call } as never,
+        useDomainIntents: true,
+        postIntent: mockedPostStudioIntent,
+      }),
+      approval: createApproval("approval-1"),
+      preferredAgentId: "agent-1",
+      getAgents: () => [createAgent({ runId: "run-1" })],
+      pausedRunIdByAgentId,
+      isDisconnectLikeError: () => false,
+      logWarn: vi.fn(),
+    });
+
+    expect(pausedRunIdByAgentId.get("agent-1")).toBe("run-1");
+    expect(mockedPostStudioIntent).toHaveBeenCalledWith("/api/intents/chat-abort", {
+      sessionKey: "agent:agent-1:main",
+    });
+    expect(call).not.toHaveBeenCalledWith("chat.abort", expect.anything());
+  });
 });
