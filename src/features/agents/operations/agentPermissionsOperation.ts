@@ -1,14 +1,12 @@
 import type { GatewayClient } from "@/lib/gateway/GatewayClient";
 import { syncGatewaySessionSettings } from "@/lib/gateway/GatewayClient";
-import {
-  readGatewayAgentExecApprovals,
-  upsertGatewayAgentExecApprovals,
-} from "@/lib/gateway/execApprovals";
 import { readConfigAgentList, updateGatewayAgentOverrides } from "@/lib/gateway/agentConfig";
-import { isStudioDomainIntentModeEnabled } from "@/lib/controlplane/domain-mode";
-import { postStudioIntent } from "@/lib/controlplane/intents-client";
+import {
+  createRuntimeWriteTransport,
+  type RuntimeWriteTransport,
+} from "@/features/agents/operations/runtimeWriteTransport";
 
-export type ExecutionRoleId = "conservative" | "collaborative" | "autonomous";
+type ExecutionRoleId = "conservative" | "collaborative" | "autonomous";
 export type CommandModeId = "off" | "ask" | "auto";
 
 export type AgentPermissionsDraft = {
@@ -17,7 +15,7 @@ export type AgentPermissionsDraft = {
   fileTools: boolean;
 };
 
-export type ToolGroupState = {
+type ToolGroupState = {
   runtime: boolean | null;
   web: boolean | null;
   fs: boolean | null;
@@ -137,23 +135,6 @@ export const resolveAgentPermissionsDraft = (params: {
   };
 };
 
-export function resolveExecApprovalsPolicyForRole(params: {
-  role: ExecutionRoleId;
-  allowlist: Array<{ pattern: string }>;
-}):
-  | {
-      security: "full" | "allowlist";
-      ask: "off" | "always";
-      allowlist: Array<{ pattern: string }>;
-    }
-  | null {
-  if (params.role === "conservative") return null;
-  if (params.role === "autonomous") {
-    return { security: "full", ask: "off", allowlist: params.allowlist };
-  }
-  return { security: "allowlist", ask: "always", allowlist: params.allowlist };
-}
-
 export function resolveToolGroupOverrides(params: {
   existingTools: unknown;
   runtimeEnabled: boolean;
@@ -214,38 +195,6 @@ export function resolveSessionExecSettingsForRole(params: {
   return { execHost, execSecurity: "allowlist", execAsk: "always" };
 }
 
-export function resolveRuntimeToolOverridesForRole(params: {
-  role: ExecutionRoleId;
-  existingTools: unknown;
-}): { tools: { allow?: string[]; alsoAllow?: string[]; deny?: string[] } } {
-  const tools = isRecord(params.existingTools) ? params.existingTools : null;
-
-  const existingAllow = coerceStringArray(tools?.allow);
-  const existingAlsoAllow = coerceStringArray(tools?.alsoAllow);
-  const existingDeny = coerceStringArray(tools?.deny) ?? [];
-
-  const usesAllow = existingAllow !== null;
-  const baseAllowed = new Set(usesAllow ? existingAllow : existingAlsoAllow ?? []);
-  const deny = new Set(existingDeny);
-
-  if (params.role === "conservative") {
-    baseAllowed.delete("group:runtime");
-    deny.add("group:runtime");
-  } else {
-    baseAllowed.add("group:runtime");
-    deny.delete("group:runtime");
-  }
-
-  const allowedList = Array.from(baseAllowed);
-  const denyList = Array.from(deny).filter((entry) => !baseAllowed.has(entry));
-
-  return {
-    tools: usesAllow
-      ? { allow: allowedList, deny: denyList }
-      : { alsoAllow: allowedList, deny: denyList },
-  };
-}
-
 type AgentRuntimeConfigContext = {
   sandboxMode: string;
   tools: Record<string, unknown> | null;
@@ -290,53 +239,50 @@ const resolveAgentRuntimeConfigContext = async (params: {
 };
 
 const upsertExecApprovalsPolicyForRole = async (params: {
-  client: GatewayClient;
   agentId: string;
   role: ExecutionRoleId;
-  useDomainIntents?: boolean;
+  runtimeWriteTransport: RuntimeWriteTransport;
 }) => {
-  const useDomainIntents = params.useDomainIntents ?? isStudioDomainIntentModeEnabled();
-  if (useDomainIntents) {
-    await postStudioIntent("/api/intents/exec-approvals-set", {
-      agentId: params.agentId,
-      role: params.role,
-    });
-    return;
-  }
-  const existingPolicy = await readGatewayAgentExecApprovals({
-    client: params.client,
+  await params.runtimeWriteTransport.execApprovalsSet({
     agentId: params.agentId,
-  });
-  const allowlist = existingPolicy?.allowlist ?? [];
-  const nextPolicy = resolveExecApprovalsPolicyForRole({ role: params.role, allowlist });
-
-  await upsertGatewayAgentExecApprovals({
-    client: params.client,
-    agentId: params.agentId,
-    policy: nextPolicy,
+    role: params.role,
   });
 };
 
 export async function updateAgentPermissionsViaStudio(params: {
   client: GatewayClient;
+  runtimeWriteTransport?: RuntimeWriteTransport;
   agentId: string;
   sessionKey: string;
   draft: AgentPermissionsDraft;
   loadAgents?: () => Promise<void>;
-  useDomainIntents?: boolean;
 }): Promise<void> {
   const agentId = params.agentId.trim();
   if (!agentId) {
     throw new Error("Agent id is required.");
   }
+  const runtimeWriteTransport =
+    params.runtimeWriteTransport ??
+    createRuntimeWriteTransport({
+      client: params.client,
+      useDomainIntents: false,
+    });
+
+  if (runtimeWriteTransport.useDomainIntents === true) {
+    await runtimeWriteTransport.agentPermissionsUpdate({
+      agentId,
+      sessionKey: params.sessionKey,
+      commandMode: params.draft.commandMode,
+      webAccess: params.draft.webAccess,
+      fileTools: params.draft.fileTools,
+    });
+    if (params.loadAgents) {
+      await params.loadAgents();
+    }
+    return;
+  }
 
   const role = resolveRoleForCommandMode(params.draft.commandMode);
-  await upsertExecApprovalsPolicyForRole({
-    client: params.client,
-    agentId,
-    role,
-    useDomainIntents: params.useDomainIntents,
-  });
   const runtimeConfigContext = await resolveAgentRuntimeConfigContext({
     client: params.client,
     agentId,
@@ -366,57 +312,13 @@ export async function updateAgentPermissionsViaStudio(params: {
     execSecurity: execSettings.execSecurity,
     execAsk: execSettings.execAsk,
   });
+  await upsertExecApprovalsPolicyForRole({
+    agentId,
+    role,
+    runtimeWriteTransport,
+  });
 
   if (params.loadAgents) {
     await params.loadAgents();
   }
-}
-
-export async function updateExecutionRoleViaStudio(params: {
-  client: GatewayClient;
-  agentId: string;
-  sessionKey: string;
-  role: ExecutionRoleId;
-  loadAgents: () => Promise<void>;
-  useDomainIntents?: boolean;
-}): Promise<void> {
-  const agentId = params.agentId.trim();
-  if (!agentId) {
-    throw new Error("Agent id is required.");
-  }
-
-  await upsertExecApprovalsPolicyForRole({
-    client: params.client,
-    agentId,
-    role: params.role,
-    useDomainIntents: params.useDomainIntents,
-  });
-  const runtimeConfigContext = await resolveAgentRuntimeConfigContext({
-    client: params.client,
-    agentId,
-  });
-
-  const toolOverrides = resolveRuntimeToolOverridesForRole({
-    role: params.role,
-    existingTools: runtimeConfigContext.tools,
-  });
-  await updateGatewayAgentOverrides({
-    client: params.client,
-    agentId,
-    overrides: toolOverrides,
-  });
-
-  const execSettings = resolveSessionExecSettingsForRole({
-    role: params.role,
-    sandboxMode: runtimeConfigContext.sandboxMode,
-  });
-  await syncGatewaySessionSettings({
-    client: params.client,
-    sessionKey: params.sessionKey,
-    execHost: execSettings.execHost,
-    execSecurity: execSettings.execSecurity,
-    execAsk: execSettings.execAsk,
-  });
-
-  await params.loadAgents();
 }
