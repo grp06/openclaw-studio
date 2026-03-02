@@ -8,6 +8,7 @@ import {
   runPauseRunForExecApprovalOperation,
   runResolveExecApprovalOperation,
 } from "@/features/agents/approvals/execApprovalRunControlOperation";
+import { createRuntimeWriteTransport } from "@/features/agents/operations/runtimeWriteTransport";
 import type { ExecApprovalPendingSnapshot } from "@/features/agents/approvals/execApprovalControlLoopWorkflow";
 import type { AgentState } from "@/features/agents/state/store";
 import { EXEC_APPROVAL_AUTO_RESUME_MARKER } from "@/lib/text/message-extract";
@@ -102,7 +103,11 @@ describe("execApprovalRunControlOperation", () => {
 
     await runPauseRunForExecApprovalOperation({
       status: "connected",
-      client: { call },
+      runtimeWriteTransport: createRuntimeWriteTransport({
+        client: { call } as never,
+        useDomainIntents: false,
+        postIntent: mockedPostStudioIntent,
+      }),
       approval: createApproval("approval-1"),
       preferredAgentId: "agent-1",
       getAgents: () => [createAgent({ runId: "run-1" })],
@@ -129,7 +134,11 @@ describe("execApprovalRunControlOperation", () => {
 
     await runPauseRunForExecApprovalOperation({
       status: "connected",
-      client: { call },
+      runtimeWriteTransport: createRuntimeWriteTransport({
+        client: { call } as never,
+        useDomainIntents: false,
+        postIntent: mockedPostStudioIntent,
+      }),
       approval: createApproval("approval-1"),
       preferredAgentId: "agent-1",
       getAgents: () => [createAgent({ runId: "run-1" })],
@@ -153,11 +162,16 @@ describe("execApprovalRunControlOperation", () => {
       throw new Error(`Unexpected method ${method}`);
     });
     const dispatch = vi.fn();
-    const sendChatMessage = vi.fn(async () => undefined);
+    const sendChatMessage = vi.fn(async () => ({ ok: true }));
     const pausedRunIdByAgentId = new Map<string, string>([["agent-1", "run-1"]]);
 
     await runExecApprovalAutoResumeOperation({
       client: { call },
+      runtimeWriteTransport: createRuntimeWriteTransport({
+        client: { call } as never,
+        useDomainIntents: false,
+        postIntent: mockedPostStudioIntent,
+      }),
       dispatch,
       approval: createApproval("approval-1"),
       targetAgentId: "agent-1",
@@ -200,7 +214,7 @@ describe("execApprovalRunControlOperation", () => {
     mockedPostStudioIntent.mockReset();
     const call = vi.fn(async () => ({ status: "ok" }));
     const dispatch = vi.fn();
-    const sendChatMessage = vi.fn(async () => undefined);
+    const sendChatMessage = vi.fn(async () => ({ ok: true }));
     const pausedRunIdByAgentId = new Map<string, string>([["agent-1", "run-1"]]);
 
     let readCount = 0;
@@ -214,6 +228,11 @@ describe("execApprovalRunControlOperation", () => {
 
     await runExecApprovalAutoResumeOperation({
       client: { call },
+      runtimeWriteTransport: createRuntimeWriteTransport({
+        client: { call } as never,
+        useDomainIntents: false,
+        postIntent: mockedPostStudioIntent,
+      }),
       dispatch,
       approval: createApproval("approval-1"),
       targetAgentId: "agent-1",
@@ -232,6 +251,94 @@ describe("execApprovalRunControlOperation", () => {
     expect(sendChatMessage).not.toHaveBeenCalled();
   });
 
+  it("re-evaluates pending approvals after wait and skips follow-up when blocked", async () => {
+    process.env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE = "false";
+    mockedPostStudioIntent.mockReset();
+    const call = vi.fn(async () => ({ status: "ok" }));
+    const dispatch = vi.fn();
+    const sendChatMessage = vi.fn(async () => ({ ok: true }));
+    const pausedRunIdByAgentId = new Map<string, string>([["agent-1", "run-1"]]);
+
+    let pendingReads = 0;
+    const getPendingState = () => {
+      pendingReads += 1;
+      if (pendingReads === 1) {
+        return createPendingState();
+      }
+      return createPendingState({
+        approvalsByAgentId: {
+          "agent-1": [createApproval("approval-2")],
+        },
+      });
+    };
+
+    await runExecApprovalAutoResumeOperation({
+      client: { call },
+      runtimeWriteTransport: createRuntimeWriteTransport({
+        client: { call } as never,
+        useDomainIntents: false,
+        postIntent: mockedPostStudioIntent,
+      }),
+      dispatch,
+      approval: createApproval("approval-1"),
+      targetAgentId: "agent-1",
+      getAgents: () => [createAgent({ status: "running", runId: "run-1" })],
+      getPendingState,
+      pausedRunIdByAgentId,
+      isDisconnectLikeError: () => false,
+      logWarn: vi.fn(),
+      sendChatMessage,
+    });
+
+    expect(call).toHaveBeenCalledWith("agent.wait", {
+      runId: "run-1",
+      timeoutMs: EXEC_APPROVAL_AUTO_RESUME_WAIT_TIMEOUT_MS,
+    });
+    expect(pendingReads).toBe(2);
+    expect(sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("stops auto-resume when paused-run wait fails with disconnect-like error", async () => {
+    process.env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE = "false";
+    mockedPostStudioIntent.mockReset();
+    const waitError = new Error("connection closed");
+    const call = vi.fn(async (method: string) => {
+      if (method === "agent.wait") {
+        throw waitError;
+      }
+      return { status: "ok" };
+    });
+    const dispatch = vi.fn();
+    const sendChatMessage = vi.fn(async () => ({ ok: true }));
+    const logWarn = vi.fn();
+    const pausedRunIdByAgentId = new Map<string, string>([["agent-1", "run-1"]]);
+
+    await runExecApprovalAutoResumeOperation({
+      client: { call },
+      runtimeWriteTransport: createRuntimeWriteTransport({
+        client: { call } as never,
+        useDomainIntents: false,
+        postIntent: mockedPostStudioIntent,
+      }),
+      dispatch,
+      approval: createApproval("approval-1"),
+      targetAgentId: "agent-1",
+      getAgents: () => [createAgent({ status: "running", runId: "run-1" })],
+      getPendingState: () => createPendingState(),
+      pausedRunIdByAgentId,
+      isDisconnectLikeError: (error) => error === waitError,
+      logWarn,
+      sendChatMessage,
+    });
+
+    expect(call).toHaveBeenCalledWith("agent.wait", {
+      runId: "run-1",
+      timeoutMs: EXEC_APPROVAL_AUTO_RESUME_WAIT_TIMEOUT_MS,
+    });
+    expect(sendChatMessage).not.toHaveBeenCalled();
+    expect(logWarn).not.toHaveBeenCalled();
+  });
+
   it("resolves approvals through resolver and delegates allow flow to auto-resume operation", async () => {
     process.env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE = "false";
     mockedPostStudioIntent.mockReset();
@@ -248,6 +355,11 @@ describe("execApprovalRunControlOperation", () => {
 
     await runResolveExecApprovalOperation({
       client: { call: vi.fn(async () => ({ ok: true })) },
+      runtimeWriteTransport: createRuntimeWriteTransport({
+        client: { call: vi.fn(async () => ({ ok: true })) } as never,
+        useDomainIntents: false,
+        postIntent: mockedPostStudioIntent,
+      }),
       approvalId: "approval-1",
       decision: "allow-once",
       getAgents: () => [createAgent()],
@@ -332,7 +444,11 @@ describe("execApprovalRunControlOperation", () => {
 
     await runPauseRunForExecApprovalOperation({
       status: "connected",
-      client: { call },
+      runtimeWriteTransport: createRuntimeWriteTransport({
+        client: { call } as never,
+        useDomainIntents: true,
+        postIntent: mockedPostStudioIntent,
+      }),
       approval: createApproval("approval-1"),
       preferredAgentId: "agent-1",
       getAgents: () => [createAgent({ runId: "run-1" })],
@@ -343,6 +459,11 @@ describe("execApprovalRunControlOperation", () => {
 
     await runExecApprovalAutoResumeOperation({
       client: { call },
+      runtimeWriteTransport: createRuntimeWriteTransport({
+        client: { call } as never,
+        useDomainIntents: true,
+        postIntent: mockedPostStudioIntent,
+      }),
       dispatch: vi.fn(),
       approval: createApproval("approval-1"),
       targetAgentId: "agent-1",
@@ -351,7 +472,7 @@ describe("execApprovalRunControlOperation", () => {
       pausedRunIdByAgentId: new Map([["agent-1", "run-1"]]),
       isDisconnectLikeError: () => false,
       logWarn: vi.fn(),
-      sendChatMessage: vi.fn(async () => undefined),
+      sendChatMessage: vi.fn(async () => ({ ok: true })),
     });
 
     expect(mockedPostStudioIntent).toHaveBeenCalledWith("/api/intents/chat-abort", {

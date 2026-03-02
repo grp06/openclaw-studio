@@ -11,8 +11,7 @@ import { sendChatMessageViaStudio } from "@/features/agents/operations/chatSendO
 import { mergePendingLivePatch } from "@/features/agents/state/livePatchQueue";
 import { buildNewSessionAgentPatch, type AgentState } from "@/features/agents/state/store";
 import type { GatewayStatus } from "@/lib/gateway/GatewayClient";
-import { isStudioDomainIntentModeEnabled } from "@/lib/controlplane/domain-mode";
-import { postStudioIntent } from "@/lib/controlplane/intents-client";
+import type { RuntimeWriteTransport } from "@/features/agents/operations/runtimeWriteTransport";
 
 type ChatInteractionDispatchAction =
   | { type: "updateAgent"; agentId: string; patch: Partial<AgentState> }
@@ -25,8 +24,9 @@ type GatewayClientLike = {
   call: (method: string, params: unknown) => Promise<unknown>;
 };
 
-export type UseChatInteractionControllerParams = {
+type UseChatInteractionControllerParams = {
   client: GatewayClientLike;
+  runtimeWriteTransport: RuntimeWriteTransport;
   status: GatewayStatus;
   agents: AgentState[];
   dispatch: (action: ChatInteractionDispatchAction) => void;
@@ -41,7 +41,7 @@ export type UseChatInteractionControllerParams = {
   draftDebounceMs?: number;
 };
 
-export type ChatInteractionController = {
+type ChatInteractionController = {
   stopBusyAgentId: string | null;
   flushPendingDraft: (agentId: string | null) => void;
   handleDraftChange: (agentId: string, value: string) => void;
@@ -56,7 +56,6 @@ export type ChatInteractionController = {
 export function useChatInteractionController(
   params: UseChatInteractionControllerParams
 ): ChatInteractionController {
-  const useDomainIntents = isStudioDomainIntentModeEnabled();
   const [stopBusyAgentId, setStopBusyAgentId] = useState<string | null>(null);
   const stopBusyAgentIdRef = useRef<string | null>(stopBusyAgentId);
   const pendingDraftValuesRef = useRef<Map<string, string>>(new Map());
@@ -221,6 +220,7 @@ export function useChatInteractionController(
       clearPendingLivePatch(agent.agentId);
       await sendChatMessageViaStudio({
         client: params.client,
+        runtimeWriteTransport: params.runtimeWriteTransport,
         dispatch: params.dispatch,
         getAgent: (currentAgentId) =>
           params.getAgents().find((entry) => entry.agentId === currentAgentId) ?? null,
@@ -250,14 +250,10 @@ export function useChatInteractionController(
       if (params.status !== "connected") return;
       const nextMessage = agent.nextMessage.trim();
       if (!nextMessage) return;
-      params.dispatch({
-        type: "shiftQueuedMessage",
-        agentId: agent.agentId,
-        expectedMessage: nextMessage,
-      });
       clearPendingLivePatch(agent.agentId);
-      await sendChatMessageViaStudio({
+      const result = await sendChatMessageViaStudio({
         client: params.client,
+        runtimeWriteTransport: params.runtimeWriteTransport,
         dispatch: params.dispatch,
         getAgent: (currentAgentId) =>
           params.getAgents().find((entry) => entry.agentId === currentAgentId) ?? null,
@@ -265,6 +261,12 @@ export function useChatInteractionController(
         sessionKey: agent.sessionKey,
         message: nextMessage,
         clearRunTracking: (runId) => params.clearRunTracking(runId),
+      });
+      if (!result.ok) return;
+      params.dispatch({
+        type: "shiftQueuedMessage",
+        agentId: agent.agentId,
+        expectedMessage: nextMessage,
       });
     },
     [clearPendingLivePatch, params]
@@ -311,13 +313,9 @@ export function useChatInteractionController(
       setStopBusyAgentId(agentId);
       stopBusyAgentIdRef.current = agentId;
       try {
-        if (useDomainIntents) {
-          await postStudioIntent("/api/intents/chat-abort", { sessionKey: stopIntent.sessionKey });
-        } else {
-          await params.client.call("chat.abort", {
-            sessionKey: stopIntent.sessionKey,
-          });
-        }
+        await params.runtimeWriteTransport.chatAbort({
+          sessionKey: stopIntent.sessionKey,
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to stop run.";
         params.setError(message);
@@ -335,7 +333,7 @@ export function useChatInteractionController(
         });
       }
     },
-    [params, useDomainIntents]
+    [params]
   );
 
   const handleNewSession = useCallback(
@@ -355,11 +353,9 @@ export function useChatInteractionController(
         if (newSessionIntent.kind === "deny") {
           throw new Error(newSessionIntent.message);
         }
-        if (useDomainIntents) {
-          await postStudioIntent("/api/intents/sessions-reset", { key: newSessionIntent.sessionKey });
-        } else {
-          await params.client.call("sessions.reset", { key: newSessionIntent.sessionKey });
-        }
+        await params.runtimeWriteTransport.sessionsReset({
+          key: newSessionIntent.sessionKey,
+        });
         const patch = buildNewSessionAgentPatch(agent);
         params.clearRunTracking(agent.runId);
         params.clearHistoryInFlight(newSessionIntent.sessionKey);
@@ -382,7 +378,7 @@ export function useChatInteractionController(
         });
       }
     },
-    [params, useDomainIntents]
+    [params]
   );
 
   return {

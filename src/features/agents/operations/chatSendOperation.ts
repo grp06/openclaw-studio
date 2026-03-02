@@ -1,6 +1,5 @@
 import {
   isWebchatSessionMutationBlockedError,
-  syncGatewaySessionSettings,
   type GatewayClient,
 } from "@/lib/gateway/GatewayClient";
 import {
@@ -8,11 +7,13 @@ import {
   isMetaMarkdown,
   parseMetaMarkdown,
 } from "@/lib/text/message-extract";
-import { isStudioDomainIntentModeEnabled } from "@/lib/controlplane/domain-mode";
-import { postStudioIntent } from "@/lib/controlplane/intents-client";
 import type { AgentState } from "@/features/agents/state/store";
 import { randomUUID } from "@/lib/uuid";
 import type { TranscriptAppendMeta } from "@/features/agents/state/transcript";
+import {
+  createRuntimeWriteTransport,
+  type RuntimeWriteTransport,
+} from "@/features/agents/operations/runtimeWriteTransport";
 
 type SendDispatchAction =
   | { type: "updateAgent"; agentId: string; patch: Partial<AgentState> }
@@ -22,6 +23,10 @@ type SendDispatch = (action: SendDispatchAction) => void;
 
 type GatewayClientLike = {
   call: (method: string, params: unknown) => Promise<unknown>;
+};
+
+export type ChatSendOperationResult = {
+  ok: boolean;
 };
 
 const resolveLatestTranscriptTimestampMs = (agent: AgentState): number | null => {
@@ -64,6 +69,7 @@ const resolveChatSendCompletionMode = (
 
 export async function sendChatMessageViaStudio(params: {
   client: GatewayClientLike;
+  runtimeWriteTransport?: RuntimeWriteTransport;
   dispatch: SendDispatch;
   getAgent: (agentId: string) => AgentState | null;
   agentId: string;
@@ -73,15 +79,19 @@ export async function sendChatMessageViaStudio(params: {
   echoUserMessage?: boolean;
   now?: () => number;
   generateRunId?: () => string;
-  useDomainIntents?: boolean;
-}): Promise<void> {
+}): Promise<ChatSendOperationResult> {
   const trimmed = params.message.trim();
-  if (!trimmed) return;
+  if (!trimmed) return { ok: false };
   const echoUserMessage = params.echoUserMessage !== false;
 
   const generateRunId = params.generateRunId ?? (() => randomUUID());
   const now = params.now ?? (() => Date.now());
-  const useDomainIntents = params.useDomainIntents ?? isStudioDomainIntentModeEnabled();
+  const runtimeWriteTransport =
+    params.runtimeWriteTransport ??
+    createRuntimeWriteTransport({
+      client: params.client as GatewayClient,
+      useDomainIntents: false,
+    });
 
   const agentId = params.agentId;
   const runId = generateRunId();
@@ -95,7 +105,7 @@ export async function sendChatMessageViaStudio(params: {
       agentId,
       line: "Error: Agent not found.",
     });
-    return;
+    return { ok: false };
   }
 
   const isResetCommand = /^\/(reset|new)(\s|$)/i.test(trimmed);
@@ -160,8 +170,7 @@ export async function sendChatMessageViaStudio(params: {
     let createdSession = agent.sessionCreated;
     if (!agent.sessionSettingsSynced) {
       try {
-        await syncGatewaySessionSettings({
-          client: params.client as unknown as GatewayClient,
+        await runtimeWriteTransport.sessionSettingsSync({
           sessionKey: params.sessionKey,
           model: agent.model ?? null,
           thinkingLevel: agent.thinkingLevel ?? null,
@@ -194,17 +203,7 @@ export async function sendChatMessageViaStudio(params: {
       deliver: false,
       idempotencyKey: runId,
     };
-    const sendResult = useDomainIntents
-      ? await postStudioIntent<unknown>("/api/intents/chat-send", sendPayload).then(
-          (result) =>
-            (result &&
-            typeof result === "object" &&
-            "payload" in result &&
-            (result as { payload?: unknown }).payload !== undefined
-              ? (result as { payload: unknown }).payload
-              : result) as unknown
-        )
-      : await params.client.call("chat.send", sendPayload);
+    const sendResult = await runtimeWriteTransport.chatSend(sendPayload);
 
     if (!createdSession) {
       params.dispatch({
@@ -227,6 +226,7 @@ export async function sendChatMessageViaStudio(params: {
         },
       });
     }
+    return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Gateway error";
     params.dispatch({
@@ -239,5 +239,6 @@ export async function sendChatMessageViaStudio(params: {
       agentId,
       line: `Error: ${msg}`,
     });
+    return { ok: false };
   }
 }

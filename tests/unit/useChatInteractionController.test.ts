@@ -5,10 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatInteractionController } from "@/features/agents/operations/useChatInteractionController";
 import type { AgentState } from "@/features/agents/state/store";
 import { sendChatMessageViaStudio } from "@/features/agents/operations/chatSendOperation";
+import {
+  createRuntimeWriteTransport,
+  type RuntimeWriteTransport,
+} from "@/features/agents/operations/runtimeWriteTransport";
 import { postStudioIntent } from "@/lib/controlplane/intents-client";
 
 vi.mock("@/features/agents/operations/chatSendOperation", () => ({
-  sendChatMessageViaStudio: vi.fn(async () => undefined),
+  sendChatMessageViaStudio: vi.fn(async () => ({ ok: true })),
 }));
 vi.mock("@/lib/controlplane/intents-client", () => ({
   postStudioIntent: vi.fn(async () => ({ ok: true })),
@@ -94,6 +98,7 @@ const renderController = (
   overrides?: Partial<{
     status: GatewayStatus;
     agents: AgentState[];
+    runtimeWriteTransport: RuntimeWriteTransport;
     call: CallFn;
     dispatch: DispatchFn;
     setError: ErrorFn;
@@ -125,6 +130,13 @@ const renderController = (
     overrides?.setInspectSidebarNull ?? (() => undefined)
   );
   const setMobilePaneChat = vi.fn<VoidFn>(overrides?.setMobilePaneChat ?? (() => undefined));
+  const runtimeWriteTransport =
+    overrides?.runtimeWriteTransport ??
+    createRuntimeWriteTransport({
+      client: { call } as never,
+      useDomainIntents: false,
+      postIntent: postStudioIntent,
+    });
 
   const valueRef: { current: ControllerValue | null } = { current: null };
 
@@ -148,6 +160,7 @@ const renderController = (
       clearSpecialLatestUpdateInFlight,
       setInspectSidebarNull,
       setMobilePaneChat,
+      runtimeWriteTransport,
     });
     useEffect(() => {
       onValue(value);
@@ -202,10 +215,9 @@ describe("useChatInteractionController", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     mockedSendChatMessageViaStudio.mockReset();
-    mockedSendChatMessageViaStudio.mockResolvedValue(undefined);
+    mockedSendChatMessageViaStudio.mockResolvedValue({ ok: true });
     mockedPostStudioIntent.mockReset();
     mockedPostStudioIntent.mockResolvedValue({ ok: true });
-    process.env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE = "false";
   });
 
   afterEach(() => {
@@ -348,6 +360,40 @@ describe("useChatInteractionController", () => {
         message: "next message",
       })
     );
+  });
+
+  it("retains queued message when deferred send fails", async () => {
+    mockedSendChatMessageViaStudio.mockResolvedValueOnce({ ok: false });
+    const ctx = renderController({
+      agents: [createAgent({ status: "running", queuedMessages: ["next message"] })],
+    });
+
+    act(() => {
+      ctx.setAgents([
+        createAgent({
+          status: "idle",
+          sessionKey: "agent:agent-1:studio:drain",
+          queuedMessages: ["next message"],
+        }),
+      ]);
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockedSendChatMessageViaStudio).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "agent-1",
+        sessionKey: "agent:agent-1:studio:drain",
+        message: "next message",
+      })
+    );
+    expect(
+      ctx.dispatch.mock.calls.some(
+        ([action]: [InteractionDispatchAction]) => action.type === "shiftQueuedMessage"
+      )
+    ).toBe(false);
   });
 
   it("does not drain queued messages while disconnected", async () => {
@@ -510,8 +556,14 @@ describe("useChatInteractionController", () => {
   });
 
   it("uses sessions-reset intent for new-session in domain mode", async () => {
-    process.env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE = "true";
+    const call = vi.fn(async () => ({}));
     const ctx = renderController({
+      call,
+      runtimeWriteTransport: createRuntimeWriteTransport({
+        client: { call } as never,
+        useDomainIntents: true,
+        postIntent: mockedPostStudioIntent,
+      }),
       agents: [
         createAgent({
           agentId: "agent-1",
@@ -529,6 +581,36 @@ describe("useChatInteractionController", () => {
       key: "session-42",
     });
     expect(ctx.call).not.toHaveBeenCalledWith("sessions.reset", expect.anything());
+  });
+
+  it("does not switch to domain intents when explicit mode flag is false", async () => {
+    process.env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE = "true";
+    const call = vi.fn(async () => ({}));
+    const ctx = renderController({
+      call,
+      runtimeWriteTransport: createRuntimeWriteTransport({
+        client: { call } as never,
+        useDomainIntents: false,
+        postIntent: mockedPostStudioIntent,
+      }),
+      agents: [
+        createAgent({
+          agentId: "agent-1",
+          runId: "run-42",
+          sessionKey: "session-42",
+        }),
+      ],
+    });
+
+    await act(async () => {
+      await ctx.getValue().handleNewSession("agent-1");
+    });
+
+    expect(ctx.call).toHaveBeenCalledWith("sessions.reset", { key: "session-42" });
+    expect(mockedPostStudioIntent).not.toHaveBeenCalledWith(
+      "/api/intents/sessions-reset",
+      expect.anything()
+    );
   });
 
   it("appends output when new-session fails", async () => {

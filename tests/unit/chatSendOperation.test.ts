@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AgentState } from "@/features/agents/state/store";
 import { sendChatMessageViaStudio } from "@/features/agents/operations/chatSendOperation";
+import { createRuntimeWriteTransport } from "@/features/agents/operations/runtimeWriteTransport";
 import { GatewayResponseError } from "@/lib/gateway/errors";
 import { formatMetaMarkdown } from "@/lib/text/message-extract";
 
@@ -160,6 +161,10 @@ describe("sendChatMessageViaStudio", () => {
 
     await sendChatMessageViaStudio({
       client: { call },
+      runtimeWriteTransport: createRuntimeWriteTransport({
+        client: { call } as never,
+        useDomainIntents: true,
+      }),
       dispatch,
       getAgent: () => agent,
       agentId: agent.agentId,
@@ -167,7 +172,6 @@ describe("sendChatMessageViaStudio", () => {
       message: "hello",
       now: () => 1234,
       generateRunId: () => "run-1",
-      useDomainIntents: true,
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -175,6 +179,59 @@ describe("sendChatMessageViaStudio", () => {
       expect.objectContaining({ method: "POST" })
     );
     expect(call).not.toHaveBeenCalledWith("chat.send", expect.anything());
+    vi.unstubAllGlobals();
+  });
+
+  it("uses session-settings-sync intent before chat-send in domain mode when unsynced", async () => {
+    const agent = createAgent({ sessionSettingsSynced: false, sessionCreated: false });
+    const dispatch = vi.fn();
+    const call = vi.fn(async () => {
+      throw new Error("gateway client should not be called in domain mode");
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/intents/session-settings-sync") {
+        return new Response(JSON.stringify({ ok: true, payload: { ok: true } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url === "/api/intents/chat-send") {
+        return new Response(JSON.stringify({ ok: true, payload: { runId: "run-1", status: "started" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendChatMessageViaStudio({
+      client: { call },
+      runtimeWriteTransport: createRuntimeWriteTransport({
+        client: { call } as never,
+        useDomainIntents: true,
+      }),
+      dispatch,
+      getAgent: () => agent,
+      agentId: agent.agentId,
+      sessionKey: agent.sessionKey,
+      message: "hello",
+      now: () => 1234,
+      generateRunId: () => "run-1",
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/intents/session-settings-sync",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/intents/chat-send",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(call).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 
@@ -374,7 +431,7 @@ describe("sendChatMessageViaStudio", () => {
     const dispatch = vi.fn();
     const call = vi.fn(async () => ({ runId: "run-1", status: "started" }));
 
-    await sendChatMessageViaStudio({
+    const result = await sendChatMessageViaStudio({
       client: { call },
       dispatch,
       getAgent: () => agent,
@@ -385,6 +442,7 @@ describe("sendChatMessageViaStudio", () => {
       generateRunId: () => "run-1",
     });
 
+    expect(result).toEqual({ ok: true });
     expect(call).toHaveBeenCalledWith(
       "chat.send",
       expect.objectContaining({ sessionKey: agent.sessionKey })
@@ -555,7 +613,7 @@ describe("sendChatMessageViaStudio", () => {
       return { ok: true };
     });
 
-    await sendChatMessageViaStudio({
+    const result = await sendChatMessageViaStudio({
       client: { call },
       dispatch,
       getAgent: () => agent,
@@ -566,6 +624,7 @@ describe("sendChatMessageViaStudio", () => {
       generateRunId: () => "run-1",
     });
 
+    expect(result).toEqual({ ok: false });
     expect(dispatch).toHaveBeenCalledWith({
       type: "updateAgent",
       agentId: agent.agentId,
