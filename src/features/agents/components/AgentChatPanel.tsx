@@ -735,7 +735,7 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
       <div
         ref={chatRef}
         data-testid="agent-chat-scroll"
-        className={`ui-chat-scroll ui-chat-scroll-borderless h-full overflow-auto p-4 dark:p-6 sm:p-5 dark:sm:p-7 ${showJumpToLatest ? "pb-20" : ""}`}
+        className={`ui-chat-scroll ui-chat-scroll-borderless h-full overflow-auto p-3 sm:p-5 dark:sm:p-7 ${showJumpToLatest ? "pb-20" : ""}`}
         onScroll={() => updatePinnedFromScroll()}
         onWheel={(event) => {
           event.stopPropagation();
@@ -902,7 +902,7 @@ const AgentChatComposer = memo(function AgentChatComposer({
     if (modelOptions.length === 0) return "No models found";
     return modelOptions.find((option) => option.value === modelValue)?.label ?? modelValue;
   }, [modelOptions, modelValue]);
-  const modelSelectWidthCh = Math.max(11, Math.min(44, modelSelectedLabel.length + 6));
+  const modelSelectWidthCh = Math.max(11, Math.min(30, modelSelectedLabel.length + 6));
   const thinkingSelectedLabel = useMemo(() => {
     switch (thinkingValue) {
       case "off":
@@ -921,7 +921,7 @@ const AgentChatComposer = memo(function AgentChatComposer({
         return "Default";
     }
   }, [thinkingValue]);
-  const thinkingSelectWidthCh = Math.max(9, Math.min(22, thinkingSelectedLabel.length + 6));
+  const thinkingSelectWidthCh = Math.max(9, Math.min(16, thinkingSelectedLabel.length + 6));
   return (
     <div className="rounded-2xl border border-border/65 bg-surface-2/45 px-3 py-2">
       {queuedMessages.length > 0 ? (
@@ -1015,14 +1015,14 @@ const AgentChatComposer = memo(function AgentChatComposer({
           Send
         </button>
       </div>
-      <div className="mt-1 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
+      <div className="mt-2 flex flex-col gap-2 sm:mt-1 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
           <InlineHoverTooltip text="Choose model">
             <select
-              className="ui-input ui-control-important h-6 min-w-0 rounded-md px-1.5 text-[10px] font-semibold text-foreground"
+              className="ui-input ui-control-important h-6 min-w-0 max-w-full rounded-md px-1.5 text-[10px] font-semibold text-foreground"
               aria-label="Model"
               value={modelValue}
-              style={{ width: `${modelSelectWidthCh}ch` }}
+              style={{ width: `${modelSelectWidthCh}ch`, maxWidth: "clamp(12ch, 58vw, 30ch)" }}
               onChange={(event) => {
                 const nextValue = event.target.value.trim();
                 onModelChange(nextValue ? nextValue : null);
@@ -1042,10 +1042,10 @@ const AgentChatComposer = memo(function AgentChatComposer({
           {allowThinking ? (
             <InlineHoverTooltip text="Select reasoning effort">
               <select
-                className="ui-input ui-control-important h-6 rounded-md px-1.5 text-[10px] font-semibold text-foreground"
+                className="ui-input ui-control-important h-6 min-w-0 max-w-full rounded-md px-1.5 text-[10px] font-semibold text-foreground"
                 aria-label="Thinking"
                 value={thinkingValue}
-                style={{ width: `${thinkingSelectWidthCh}ch` }}
+                style={{ width: `${thinkingSelectWidthCh}ch`, maxWidth: "min(40vw, 16ch)" }}
                 onChange={(event) => {
                   const nextValue = event.target.value.trim();
                   onThinkingChange(nextValue ? nextValue : null);
@@ -1062,7 +1062,7 @@ const AgentChatComposer = memo(function AgentChatComposer({
             </InlineHoverTooltip>
           ) : null}
         </div>
-        <div className="ml-auto flex items-center gap-1.5 text-[10px] text-muted-foreground">
+        <div className="flex w-full items-center justify-end gap-1.5 text-[10px] text-muted-foreground sm:ml-auto sm:w-auto">
           <span className="font-mono tracking-[0.02em]">Show</span>
           <button
             type="button"
@@ -1382,7 +1382,7 @@ export const AgentChatPanel = ({
   return (
     <div data-agent-panel className="group fade-up relative flex h-full w-full flex-col">
       <div className="px-3 pt-2 sm:px-4 sm:pt-3">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             <div className="group/avatar relative">
               <AgentAvatar
@@ -1409,7 +1409,7 @@ export const AgentChatPanel = ({
 
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-2">
-                <div className="min-w-0 w-[clamp(11rem,34vw,16rem)]">
+                <div className="min-w-0 w-[clamp(8.5rem,42vw,16rem)] sm:w-[clamp(11rem,34vw,16rem)]">
                   {renameEditing ? (
                     <div ref={renameEditorRef} className="flex h-8 items-center gap-1.5">
                       <input
@@ -1474,7 +1474,7 @@ export const AgentChatPanel = ({
             </div>
           </div>
 
-          <div className="mt-0.5 flex items-center gap-2">
+          <div className="mt-0.5 flex w-full items-center justify-end gap-2 sm:w-auto">
             <button
               className="nodrag ui-btn-primary px-2.5 py-1.5 font-mono text-[11px] font-medium tracking-[0.02em] disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
               type="button"
@@ -1502,7 +1502,7 @@ export const AgentChatPanel = ({
         </div>
       </div>
 
-      <div className="mt-3 flex min-h-0 flex-1 flex-col px-3 pb-3 sm:px-4 sm:pb-4">
+      <div className="mt-3 flex min-h-0 flex-1 flex-col px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4 sm:pb-4">
         <AgentChatTranscript
           agentId={agent.agentId}
           name={agent.name}
