@@ -870,6 +870,8 @@ const AgentChatComposer = memo(function AgentChatComposer({
   showThinkingTraces,
   onToolCallingToggle,
   onThinkingTracesToggle,
+  voiceEnabled,
+  onVoiceToggle,
 }: {
   value: string;
   onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
@@ -894,6 +896,8 @@ const AgentChatComposer = memo(function AgentChatComposer({
   showThinkingTraces: boolean;
   onToolCallingToggle: (enabled: boolean) => void;
   onThinkingTracesToggle: (enabled: boolean) => void;
+  voiceEnabled: boolean;
+  onVoiceToggle: (enabled: boolean) => void;
 }) {
   const stopReason = stopDisabledReason?.trim() ?? "";
   const stopDisabled = !canSend || stopBusy || Boolean(stopReason);
@@ -1063,6 +1067,20 @@ const AgentChatComposer = memo(function AgentChatComposer({
           ) : null}
         </div>
         <div className="flex w-full flex-wrap items-center justify-end gap-1.5 text-[10px] text-muted-foreground sm:ml-auto sm:w-auto sm:flex-nowrap">
+          <button
+            type="button"
+            role="switch"
+            aria-label={voiceEnabled ? "Turn voice off" : "Turn voice on"}
+            aria-checked={voiceEnabled}
+            className={`inline-flex h-5 shrink-0 items-center rounded-sm border px-1.5 font-mono text-[10px] tracking-[0.01em] transition ${
+              voiceEnabled
+                ? "border-primary/45 bg-primary/14 text-foreground"
+                : "border-border/70 bg-surface-2/40 text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => onVoiceToggle(!voiceEnabled)}
+          >
+            Voice
+          </button>
           <span className="font-mono tracking-[0.02em]">Show</span>
           <button
             type="button"
@@ -1127,6 +1145,7 @@ export const AgentChatPanel = ({
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameDraft, setRenameDraft] = useState(agent.name);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const renameEditorRef = useRef<HTMLDivElement | null>(null);
@@ -1137,6 +1156,7 @@ export const AgentChatPanel = ({
     sessionKey: agent.sessionKey,
   });
   const pendingResizeFrameRef = useRef<number | null>(null);
+  const voiceProviderPrimedByAgentRef = useRef<Record<string, boolean>>({});
 
   const resizeDraft = useCallback(() => {
     const el = draftRef.current;
@@ -1176,6 +1196,10 @@ export const AgentChatPanel = ({
     setRenameError(null);
     setRenameDraft(agent.name);
   }, [agent.agentId, agent.name]);
+
+  useEffect(() => {
+    setVoiceEnabled(false);
+  }, [agent.agentId, agent.sessionKey]);
 
   useEffect(() => {
     if (!renameEditing) return;
@@ -1294,6 +1318,24 @@ export const AgentChatPanel = ({
   const handleComposerSend = useCallback(() => {
     handleSend(draftValue);
   }, [draftValue, handleSend]);
+
+  const handleVoiceToggle = useCallback(
+    (enabled: boolean) => {
+      if (!canSend) return;
+      setVoiceEnabled(enabled);
+      scrollToBottomNextOutputRef.current = true;
+      if (enabled) {
+        if (!voiceProviderPrimedByAgentRef.current[agent.agentId]) {
+          voiceProviderPrimedByAgentRef.current[agent.agentId] = true;
+          onSend("/tts provider edge");
+        }
+        onSend("/tts always");
+        return;
+      }
+      onSend("/tts off");
+    },
+    [agent.agentId, canSend, onSend]
+  );
 
   const beginRename = useCallback(() => {
     if (!onRename) return;
@@ -1555,6 +1597,8 @@ export const AgentChatPanel = ({
             showThinkingTraces={agent.showThinkingTraces}
             onToolCallingToggle={onToolCallingToggle}
             onThinkingTracesToggle={onThinkingTracesToggle}
+            voiceEnabled={voiceEnabled}
+            onVoiceToggle={handleVoiceToggle}
           />
         </div>
       </div>
