@@ -227,7 +227,10 @@ export const planRuntimeChatEvent = (
     isStaleTerminal: chatTerminalDecision?.isStaleTerminal ?? false,
     shouldRequestHistoryRefresh,
     shouldUpdateLastResult,
-    shouldSetRunIdle: Boolean(payload.runId && agent?.runId === payload.runId && payload.state !== "error"),
+    shouldSetRunIdle:
+      payload.state === "aborted"
+        ? agent?.status === "running"
+        : Boolean(payload.runId && agent?.runId === payload.runId && payload.state !== "error"),
     shouldSetRunError: Boolean(payload.runId && agent?.runId === payload.runId && payload.state === "error"),
     lastResultText: shouldUpdateLastResult ? finalAssistantText : null,
     assistantCompletionAt: payload.state === "final" ? assistantCompletionAt : null,

@@ -1,10 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  isWebchatSessionMutationBlockedError,
-  syncGatewaySessionSettings,
-} from "@/lib/gateway/GatewayClient";
 import type { GatewayClient } from "@/lib/gateway/GatewayClient";
+import { isWebchatSessionMutationBlockedError } from "@/lib/gateway/gateway-disconnect";
+import { syncGatewaySessionSettings } from "@/lib/gateway/session-settings-sync";
 import { GatewayResponseError } from "@/lib/gateway/errors";
 
 describe("session settings sync helper", () => {

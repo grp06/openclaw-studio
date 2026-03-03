@@ -1,4 +1,4 @@
-import type { GatewayStatus } from "@/lib/gateway/GatewayClient";
+import type { GatewayStatus } from "@/lib/gateway/gateway-status";
 import { X } from "lucide-react";
 import { resolveGatewayStatusBadgeClass, resolveGatewayStatusLabel } from "./colorSemantics";
 

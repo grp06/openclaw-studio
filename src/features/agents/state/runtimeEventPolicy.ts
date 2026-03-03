@@ -114,7 +114,9 @@ export const decideRuntimeChatEvent = (
     return intents;
   }
 
-  if (runId && activeRunId && activeRunId !== runId) {
+  const allowAbortedRunMismatchRecovery =
+    input.state === "aborted" && input.agentStatus === "running";
+  if (runId && activeRunId && activeRunId !== runId && !allowAbortedRunMismatchRecovery) {
     return [{ kind: "clearRunTracking", runId }];
   }
   if (runId && input.isStaleTerminal) {

@@ -22,7 +22,7 @@ import {
   type RuntimeCoordinatorDispatchAction,
   type RuntimeCoordinatorEffectCommand,
 } from "@/features/agents/state/runtimeEventCoordinatorWorkflow";
-import type { EventFrame } from "@/lib/gateway/GatewayClient";
+import type { EventFrame } from "@/lib/gateway/gateway-frames";
 import { isSameSessionKey } from "@/lib/gateway/session-keys";
 import { normalizeAssistantDisplayText } from "@/lib/text/assistantText";
 import {
@@ -277,8 +277,15 @@ export function createGatewayRuntimeEventHandler(
     const activeRunId = agent?.runId?.trim() ?? "";
     const role = resolveRole(payload.message);
     const nowMs = now();
+    const allowAbortedRunMismatchRecovery =
+      payload.state === "aborted" && agent?.status === "running";
 
-    if (payload.runId && activeRunId && activeRunId !== payload.runId) {
+    if (
+      payload.runId &&
+      activeRunId &&
+      activeRunId !== payload.runId &&
+      !allowAbortedRunMismatchRecovery
+    ) {
       clearRunTracking(payload.runId);
       return;
     }

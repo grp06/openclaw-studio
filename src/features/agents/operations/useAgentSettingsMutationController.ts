@@ -28,8 +28,9 @@ import {
   sortCronJobsByUpdatedAt,
   type CronJobSummary,
 } from "@/lib/cron/types";
-import type { GatewayClient, GatewayStatus } from "@/lib/gateway/GatewayClient";
-import { isGatewayDisconnectLikeError } from "@/lib/gateway/GatewayClient";
+import type { GatewayClient } from "@/lib/gateway/GatewayClient";
+import type { GatewayStatus } from "@/lib/gateway/gateway-status";
+import { isGatewayDisconnectLikeError } from "@/lib/gateway/gateway-disconnect";
 import type { GatewayModelPolicySnapshot } from "@/lib/gateway/models";
 import {
   readGatewayAgentSkillsAllowlist,
@@ -45,6 +46,16 @@ import {
   type SkillStatusEntry,
   type SkillStatusReport,
 } from "@/lib/skills/types";
+import {
+  createDomainCronJob,
+  installDomainSkill,
+  listDomainCronJobs,
+  loadDomainSkillStatus,
+  removeDomainCronJob,
+  setDomainAgentSkillsAllowlist,
+  runDomainCronJobNow,
+  updateDomainSkill,
+} from "@/lib/controlplane/domain-runtime-client";
 
 type RestartingMutationBlockState = MutationBlockState & { kind: MutationWorkflowKind };
 type SkillSetupMessage = { kind: "success" | "error"; message: string };
@@ -79,6 +90,37 @@ type UseAgentSettingsMutationControllerParams = {
   useDomainIntents: boolean;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === "object" && !Array.isArray(value));
+
+const readAgentSkillsAllowlistFromSnapshot = (
+  snapshot: GatewayModelPolicySnapshot | null,
+  agentId: string
+): string[] | undefined => {
+  const normalizedAgentId = agentId.trim();
+  if (!normalizedAgentId) return undefined;
+  const configRaw = snapshot?.config;
+  const config = isRecord(configRaw) ? configRaw : null;
+  const agentsRaw = config && isRecord(config.agents) ? config.agents : null;
+  const list = Array.isArray(agentsRaw?.list) ? agentsRaw.list : [];
+  const entry = list.find((candidate) => {
+    if (!isRecord(candidate)) return false;
+    return candidate.id === normalizedAgentId;
+  });
+  if (!entry || !isRecord(entry)) {
+    return undefined;
+  }
+  const rawSkills = (entry as Record<string, unknown>).skills;
+  if (!Array.isArray(rawSkills)) {
+    return undefined;
+  }
+  const values = rawSkills
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  return Array.from(new Set(values));
+};
+
 export function useAgentSettingsMutationController(params: UseAgentSettingsMutationControllerParams) {
   const skillsLoadRequestIdRef = useRef(0);
   const [settingsSkillsReport, setSettingsSkillsReport] = useState<SkillStatusReport | null>(null);
@@ -109,7 +151,7 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
 
   const mutationContext: AgentSettingsMutationContext = useMemo(
     () => ({
-      status: params.useDomainIntents ? "connected" : params.status,
+      status: params.status,
       hasCreateBlock: params.hasCreateBlock,
       hasRenameBlock: hasRenameMutationBlock,
       hasDeleteBlock: hasDeleteMutationBlock,
@@ -125,7 +167,6 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
       hasRenameMutationBlock,
       params.hasCreateBlock,
       params.status,
-      params.useDomainIntents,
     ]
   );
 
@@ -160,7 +201,9 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
       setSettingsSkillsLoading(true);
       setSettingsSkillsError(null);
       try {
-        const report = await loadAgentSkillStatus(params.client, resolvedAgentId);
+        const report = params.useDomainIntents
+          ? await loadDomainSkillStatus(resolvedAgentId)
+          : await loadAgentSkillStatus(params.client, resolvedAgentId);
         if (requestId !== skillsLoadRequestIdRef.current) {
           return;
         }
@@ -181,7 +224,7 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
         }
       }
     },
-    [params.client]
+    [params.client, params.useDomainIntents]
   );
 
   useEffect(() => {
@@ -229,7 +272,9 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
       setSettingsCronLoading(true);
       setSettingsCronError(null);
       try {
-        const result = await listCronJobs(params.client, { includeDisabled: true });
+        const result = params.useDomainIntents
+          ? await listDomainCronJobs({ includeDisabled: true })
+          : await listCronJobs(params.client, { includeDisabled: true });
         const filtered = filterCronJobsForAgent(result.jobs, resolvedAgentId);
         setSettingsCronJobs(sortCronJobsByUpdatedAt(filtered));
       } catch (err) {
@@ -243,7 +288,7 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
         setSettingsCronLoading(false);
       }
     },
-    [params.client]
+    [params.client, params.useDomainIntents]
   );
 
   useEffect(() => {
@@ -498,6 +543,15 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
           onBusyChange: setCronCreateBusy,
           onError: setSettingsCronError,
           onJobs: setSettingsCronJobs,
+          deps: params.useDomainIntents
+            ? {
+                createCronJobForInput: async (input) => {
+                  await createDomainCronJob(input);
+                },
+                listCronJobsWithoutClient: async ({ includeDisabled }) =>
+                  await listDomainCronJobs({ includeDisabled }),
+              }
+            : undefined,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to create automation.";
@@ -507,7 +561,14 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
         throw err;
       }
     },
-    [cronCreateBusy, cronDeleteBusyJobId, cronRunBusyJobId, mutationContext, params.client]
+    [
+      cronCreateBusy,
+      cronDeleteBusyJobId,
+      cronRunBusyJobId,
+      mutationContext,
+      params.client,
+      params.useDomainIntents,
+    ]
   );
 
   const handleRunCronJob = useCallback(
@@ -528,7 +589,11 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
       setCronRunBusyJobId(resolvedJobId);
       setSettingsCronError(null);
       try {
-        await runCronJobNow(params.client, resolvedJobId);
+        if (params.useDomainIntents) {
+          await runDomainCronJobNow(resolvedJobId);
+        } else {
+          await runCronJobNow(params.client, resolvedJobId);
+        }
         await loadCronJobsForSettingsAgent(resolvedAgentId);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to run schedule.";
@@ -538,7 +603,7 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
         setCronRunBusyJobId((current) => (current === resolvedJobId ? null : current));
       }
     },
-    [loadCronJobsForSettingsAgent, mutationContext, params.client]
+    [loadCronJobsForSettingsAgent, mutationContext, params.client, params.useDomainIntents]
   );
 
   const handleDeleteCronJob = useCallback(
@@ -559,7 +624,9 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
       setCronDeleteBusyJobId(resolvedJobId);
       setSettingsCronError(null);
       try {
-        const result = await removeCronJob(params.client, resolvedJobId);
+        const result = params.useDomainIntents
+          ? await removeDomainCronJob(resolvedJobId)
+          : await removeCronJob(params.client, resolvedJobId);
         if (result.ok && result.removed) {
           setSettingsCronJobs((jobs) => jobs.filter((job) => job.id !== resolvedJobId));
         }
@@ -572,7 +639,7 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
         setCronDeleteBusyJobId((current) => (current === resolvedJobId ? null : current));
       }
     },
-    [loadCronJobsForSettingsAgent, mutationContext, params.client]
+    [loadCronJobsForSettingsAgent, mutationContext, params.client, params.useDomainIntents]
   );
 
   const handleRenameAgent = useCallback(
@@ -727,15 +794,22 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
         agentId,
         decisionKind: "use-all-skills",
         run: async (normalizedAgentId) => {
-          await updateGatewayAgentSkillsAllowlist({
-            client: params.client,
-            agentId: normalizedAgentId,
-            mode: "all",
-          });
+          if (params.useDomainIntents) {
+            await setDomainAgentSkillsAllowlist({
+              agentId: normalizedAgentId,
+              mode: "all",
+            });
+          } else {
+            await updateGatewayAgentSkillsAllowlist({
+              client: params.client,
+              agentId: normalizedAgentId,
+              mode: "all",
+            });
+          }
         },
       });
     },
-    [params.client, runSkillsMutation]
+    [params.client, params.useDomainIntents, runSkillsMutation]
   );
 
   const handleDisableAllSkills = useCallback(
@@ -744,15 +818,22 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
         agentId,
         decisionKind: "disable-all-skills",
         run: async (normalizedAgentId) => {
-          await updateGatewayAgentSkillsAllowlist({
-            client: params.client,
-            agentId: normalizedAgentId,
-            mode: "none",
-          });
+          if (params.useDomainIntents) {
+            await setDomainAgentSkillsAllowlist({
+              agentId: normalizedAgentId,
+              mode: "none",
+            });
+          } else {
+            await updateGatewayAgentSkillsAllowlist({
+              client: params.client,
+              agentId: normalizedAgentId,
+              mode: "none",
+            });
+          }
         },
       });
     },
-    [params.client, runSkillsMutation]
+    [params.client, params.useDomainIntents, runSkillsMutation]
   );
 
   const handleSetSkillEnabled = useCallback(
@@ -773,10 +854,15 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
           if (visibleSkillNames.length === 0) {
             throw new Error("Cannot update skill access: no skills available for this agent.");
           }
-          const existingAllowlist = await readGatewayAgentSkillsAllowlist({
-            client: params.client,
-            agentId: normalizedAgentId,
-          });
+          const existingAllowlist = params.useDomainIntents
+            ? readAgentSkillsAllowlistFromSnapshot(
+                params.gatewayConfigSnapshot,
+                normalizedAgentId
+              )
+            : await readGatewayAgentSkillsAllowlist({
+                client: params.client,
+                agentId: normalizedAgentId,
+              });
           const baseline = existingAllowlist ?? visibleSkillNames;
           const next = new Set(
             baseline.map((value) => value.trim()).filter((value) => value.length > 0)
@@ -786,16 +872,25 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
           } else {
             next.delete(resolvedSkillName);
           }
-          await updateGatewayAgentSkillsAllowlist({
-            client: params.client,
-            agentId: normalizedAgentId,
-            mode: "allowlist",
-            skillNames: [...next],
-          });
+          const nextAllowlist = [...next];
+          if (params.useDomainIntents) {
+            await setDomainAgentSkillsAllowlist({
+              agentId: normalizedAgentId,
+              mode: "allowlist",
+              skillNames: nextAllowlist,
+            });
+          } else {
+            await updateGatewayAgentSkillsAllowlist({
+              client: params.client,
+              agentId: normalizedAgentId,
+              mode: "allowlist",
+              skillNames: nextAllowlist,
+            });
+          }
         },
       });
     },
-    [params.client, runSkillsMutation, settingsSkillsReport]
+    [params.client, params.gatewayConfigSnapshot, params.useDomainIntents, runSkillsMutation, settingsSkillsReport]
   );
 
   const handleSetSkillsAllowlist = useCallback(
@@ -814,16 +909,24 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
           if (normalizedSkillNames.length === 0) {
             throw new Error("Cannot set selected skills mode: choose at least one skill.");
           }
-          await updateGatewayAgentSkillsAllowlist({
-            client: params.client,
-            agentId: normalizedAgentId,
-            mode: "allowlist",
-            skillNames: normalizedSkillNames,
-          });
+          if (params.useDomainIntents) {
+            await setDomainAgentSkillsAllowlist({
+              agentId: normalizedAgentId,
+              mode: "allowlist",
+              skillNames: normalizedSkillNames,
+            });
+          } else {
+            await updateGatewayAgentSkillsAllowlist({
+              client: params.client,
+              agentId: normalizedAgentId,
+              mode: "allowlist",
+              skillNames: normalizedSkillNames,
+            });
+          }
         },
       });
     },
-    [params.client, runSkillsMutation]
+    [params.client, params.useDomainIntents, runSkillsMutation]
   );
 
   const handleSkillApiKeyDraftChange = useCallback((skillKey: string, value: string) => {
@@ -910,18 +1013,24 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
         skillKey,
         label: `Install dependencies for ${name.trim() || skillKey.trim()}`,
         run: async () => {
-          const result = await installSkill(params.client, {
-            name,
-            installId,
-            timeoutMs: SKILL_INSTALL_TIMEOUT_MS,
-          });
+          const result = params.useDomainIntents
+            ? await installDomainSkill({
+                name,
+                installId,
+                timeoutMs: SKILL_INSTALL_TIMEOUT_MS,
+              })
+            : await installSkill(params.client, {
+                name,
+                installId,
+                timeoutMs: SKILL_INSTALL_TIMEOUT_MS,
+              });
           return {
             successMessage: result.message || "Installed",
           };
         },
       });
     },
-    [SKILL_INSTALL_TIMEOUT_MS, params.client, runSkillSetupMutation]
+    [SKILL_INSTALL_TIMEOUT_MS, params.client, params.useDomainIntents, runSkillSetupMutation]
   );
 
   const handleRemoveSkill = useCallback(
@@ -1000,17 +1109,30 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
         label: `Save API key for ${normalizedSkillKey}`,
         refreshConfigSnapshot: true,
         run: async () => {
-          await updateSkill(params.client, {
-            skillKey: normalizedSkillKey,
-            apiKey,
-          });
+          if (params.useDomainIntents) {
+            await updateDomainSkill({
+              skillKey: normalizedSkillKey,
+              apiKey,
+            });
+          } else {
+            await updateSkill(params.client, {
+              skillKey: normalizedSkillKey,
+              apiKey,
+            });
+          }
           return {
             successMessage: "API key saved",
           };
         },
       });
     },
-    [params.client, runSkillSetupMutation, setSkillMessage, settingsSkillApiKeyDrafts]
+    [
+      params.client,
+      params.useDomainIntents,
+      runSkillSetupMutation,
+      setSkillMessage,
+      settingsSkillApiKeyDrafts,
+    ]
   );
 
   const handleSetSkillGlobalEnabled = useCallback(
@@ -1023,17 +1145,24 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
         label: `${enabled ? "Enable" : "Disable"} ${normalizedSkillKey}`,
         refreshConfigSnapshot: true,
         run: async () => {
-          await updateSkill(params.client, {
-            skillKey: normalizedSkillKey,
-            enabled,
-          });
+          if (params.useDomainIntents) {
+            await updateDomainSkill({
+              skillKey: normalizedSkillKey,
+              enabled,
+            });
+          } else {
+            await updateSkill(params.client, {
+              skillKey: normalizedSkillKey,
+              enabled,
+            });
+          }
           return {
             successMessage: enabled ? "Skill enabled globally" : "Skill disabled globally",
           };
         },
       });
     },
-    [params.client, runSkillSetupMutation]
+    [params.client, params.useDomainIntents, runSkillSetupMutation]
   );
 
   return {

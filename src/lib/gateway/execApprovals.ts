@@ -41,6 +41,20 @@ type ExecApprovalsSnapshot = {
   file?: ExecApprovalsFile;
 };
 
+const callGateway = async <T>(
+  client: GatewayClient,
+  method: string,
+  params: unknown
+): Promise<T> => {
+  const invoke = (
+    client as unknown as { call?: (nextMethod: string, nextParams: unknown) => Promise<unknown> }
+  ).call;
+  if (typeof invoke !== "function") {
+    throw new Error("Legacy gateway client call transport is unavailable.");
+  }
+  return (await invoke(method, params)) as T;
+};
+
 const shouldRetrySet = (err: unknown): boolean => {
   if (!(err instanceof GatewayResponseError)) return false;
   return /re-run exec\.approvals\.get|changed since last load/i.test(err.message);
@@ -69,10 +83,14 @@ const setExecApprovalsWithRetry = async (params: {
   const payload: Record<string, unknown> = { file: params.file };
   if (baseHash) payload.baseHash = baseHash;
   try {
-    await params.client.call("exec.approvals.set", payload);
+    await callGateway(params.client, "exec.approvals.set", payload);
   } catch (err) {
     if (attempt < 1 && shouldRetrySet(err)) {
-      const snapshot = await params.client.call<ExecApprovalsSnapshot>("exec.approvals.get", {});
+      const snapshot = await callGateway<ExecApprovalsSnapshot>(
+        params.client,
+        "exec.approvals.get",
+        {}
+      );
       return setExecApprovalsWithRetry({
         ...params,
         baseHash: snapshot.hash ?? undefined,
@@ -98,7 +116,11 @@ export async function upsertGatewayAgentExecApprovals(params: {
     throw new Error("Agent id is required.");
   }
 
-  const snapshot = await params.client.call<ExecApprovalsSnapshot>("exec.approvals.get", {});
+  const snapshot = await callGateway<ExecApprovalsSnapshot>(
+    params.client,
+    "exec.approvals.get",
+    {}
+  );
   const baseFile: ExecApprovalsFile =
     snapshot.file && typeof snapshot.file === "object"
       ? {
@@ -152,7 +174,11 @@ export async function readGatewayAgentExecApprovals(params: {
     throw new Error("Agent id is required.");
   }
 
-  const snapshot = await params.client.call<ExecApprovalsSnapshot>("exec.approvals.get", {});
+  const snapshot = await callGateway<ExecApprovalsSnapshot>(
+    params.client,
+    "exec.approvals.get",
+    {}
+  );
   const entry = snapshot.file?.agents?.[agentId];
   if (!entry) return null;
 

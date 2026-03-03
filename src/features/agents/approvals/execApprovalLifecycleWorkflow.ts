@@ -5,7 +5,7 @@ import {
   resolveExecApprovalAgentId,
 } from "@/features/agents/approvals/execApprovalEvents";
 import type { AgentState } from "@/features/agents/state/store";
-import type { EventFrame } from "@/lib/gateway/GatewayClient";
+import type { EventFrame } from "@/lib/gateway/gateway-frames";
 import { GatewayResponseError } from "@/lib/gateway/errors";
 
 export type ExecApprovalEventEffects = {

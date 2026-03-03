@@ -15,7 +15,7 @@ import {
 import { sendChatMessageViaStudio } from "@/features/agents/operations/chatSendOperation";
 import type { RuntimeWriteTransport } from "@/features/agents/operations/runtimeWriteTransport";
 import type { AgentState } from "@/features/agents/state/store";
-import type { EventFrame } from "@/lib/gateway/GatewayClient";
+import type { EventFrame } from "@/lib/gateway/gateway-frames";
 import { EXEC_APPROVAL_AUTO_RESUME_MARKER } from "@/lib/text/message-extract";
 
 type GatewayClientLike = {

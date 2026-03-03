@@ -53,6 +53,20 @@ const DEFAULT_ACK_MAX_CHARS = 300;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object" && !Array.isArray(value));
 
+const callGateway = async <T>(
+  client: GatewayClient,
+  method: string,
+  params: unknown
+): Promise<T> => {
+  const invoke = (
+    client as unknown as { call?: (nextMethod: string, nextParams: unknown) => Promise<unknown> }
+  ).call;
+  if (typeof invoke !== "function") {
+    throw new Error("Legacy gateway client call transport is unavailable.");
+  }
+  return (await invoke(method, params)) as T;
+};
+
 export type ConfigAgentEntry = Record<string, unknown> & { id: string };
 
 type GatewayAgentSandboxOverrides = {
@@ -272,8 +286,8 @@ export const listHeartbeatsForAgent = async (
 ): Promise<HeartbeatListResult> => {
   const resolvedAgentId = resolveHeartbeatAgentId(agentId);
   const [snapshot, status] = await Promise.all([
-    client.call<GatewayConfigSnapshot>("config.get", {}),
-    client.call<GatewayStatusSnapshot>("status", {}),
+    callGateway<GatewayConfigSnapshot>(client, "config.get", {}),
+    callGateway<GatewayStatusSnapshot>(client, "status", {}),
   ]);
   const config = isRecord(snapshot.config) ? snapshot.config : {};
   const resolved = resolveHeartbeatSettings(config, resolvedAgentId);
@@ -302,7 +316,7 @@ export const triggerHeartbeatNow = async (
   agentId: string
 ): Promise<HeartbeatWakeResult> => {
   const resolvedAgentId = resolveHeartbeatAgentId(agentId);
-  return client.call<HeartbeatWakeResult>("wake", {
+  return callGateway<HeartbeatWakeResult>(client, "wake", {
     mode: "now",
     text: `OpenClaw Studio heartbeat trigger (${resolvedAgentId}).`,
   });
@@ -331,10 +345,10 @@ const applyGatewayConfigPatch = async (params: {
   };
   if (baseHash) payload.baseHash = baseHash;
   try {
-    await params.client.call("config.patch", payload);
+    await callGateway(params.client, "config.patch", payload);
   } catch (err) {
     if (attempt < 1 && shouldRetryConfigWrite(err)) {
-      const snapshot = await params.client.call<GatewayConfigSnapshot>("config.get", {});
+      const snapshot = await callGateway<GatewayConfigSnapshot>(params.client, "config.get", {});
       return applyGatewayConfigPatch({
         ...params,
         baseHash: snapshot.hash ?? undefined,
@@ -355,7 +369,10 @@ export const renameGatewayAgent = async (params: {
   if (!trimmed) {
     throw new Error("Agent name is required.");
   }
-  await params.client.call("agents.update", { agentId: params.agentId, name: trimmed });
+  await callGateway(params.client, "agents.update", {
+    agentId: params.agentId,
+    name: trimmed,
+  });
   return { id: params.agentId, name: trimmed };
 };
 
@@ -382,7 +399,7 @@ export const createGatewayAgent = async (params: {
     throw new Error("Agent name is required.");
   }
 
-  const snapshot = await params.client.call<GatewayConfigSnapshot>("config.get", {});
+  const snapshot = await callGateway<GatewayConfigSnapshot>(params.client, "config.get", {});
   const configPath = typeof snapshot.path === "string" ? snapshot.path.trim() : "";
   if (!configPath) {
     throw new Error(
@@ -398,10 +415,14 @@ export const createGatewayAgent = async (params: {
   const idGuess = slugifyAgentName(trimmed);
   const workspace = joinPathLike(stateDir, `workspace-${idGuess}`);
 
-  const result = (await params.client.call("agents.create", {
+  const result = await callGateway<{ ok?: boolean; agentId?: string; name?: string; workspace?: string }>(
+    params.client,
+    "agents.create",
+    {
     name: trimmed,
     workspace,
-  })) as { ok?: boolean; agentId?: string; name?: string; workspace?: string };
+    }
+  );
   const agentId = typeof result?.agentId === "string" ? result.agentId.trim() : "";
   if (!agentId) {
     throw new Error("Gateway returned an invalid agents.create response (missing agentId).");
@@ -414,9 +435,9 @@ export const deleteGatewayAgent = async (params: {
   agentId: string;
 }) => {
   try {
-    const result = (await params.client.call("agents.delete", {
+    const result = await callGateway<{ ok?: boolean; removedBindings?: unknown }>(params.client, "agents.delete", {
       agentId: params.agentId,
-    })) as { ok?: boolean; removedBindings?: unknown };
+    });
     const removedBindings =
       typeof result?.removedBindings === "number" && Number.isFinite(result.removedBindings)
         ? Math.max(0, Math.floor(result.removedBindings))
@@ -435,7 +456,7 @@ export const updateGatewayHeartbeat = async (params: {
   agentId: string;
   payload: AgentHeartbeatUpdatePayload;
 }): Promise<AgentHeartbeatResult> => {
-  const snapshot = await params.client.call<GatewayConfigSnapshot>("config.get", {});
+  const snapshot = await callGateway<GatewayConfigSnapshot>(params.client, "config.get", {});
   const baseConfig = isRecord(snapshot.config) ? snapshot.config : {};
   const list = readConfigAgentList(baseConfig);
   const { list: nextList } = upsertConfigAgentEntry(list, params.agentId, (entry) => {
@@ -461,7 +482,7 @@ export const removeGatewayHeartbeatOverride = async (params: {
   client: GatewayClient;
   agentId: string;
 }): Promise<AgentHeartbeatResult> => {
-  const snapshot = await params.client.call<GatewayConfigSnapshot>("config.get", {});
+  const snapshot = await callGateway<GatewayConfigSnapshot>(params.client, "config.get", {});
   const baseConfig = isRecord(snapshot.config) ? snapshot.config : {};
   const list = readConfigAgentList(baseConfig);
   const nextList = list.map((entry) => {
@@ -580,7 +601,7 @@ export const readGatewayAgentSkillsAllowlist = async (params: {
   agentId: string;
 }): Promise<string[] | undefined> => {
   const agentId = resolveRequiredAgentId(params.agentId);
-  const snapshot = await params.client.call<GatewayConfigSnapshot>("config.get", {});
+  const snapshot = await callGateway<GatewayConfigSnapshot>(params.client, "config.get", {});
   const baseConfig = isRecord(snapshot.config) ? snapshot.config : {};
   const list = readConfigAgentList(baseConfig);
   const entry = list.find((item) => item.id === agentId);
@@ -606,7 +627,7 @@ export const updateGatewayAgentSkillsAllowlist = async (params: {
   }
 
   const attemptWrite = async (attempt: number): Promise<void> => {
-    const snapshot = await params.client.call<GatewayConfigSnapshot>("config.get", {});
+    const snapshot = await callGateway<GatewayConfigSnapshot>(params.client, "config.get", {});
     const baseConfig = isRecord(snapshot.config) ? snapshot.config : {};
     const nextConfig = buildAgentSkillsConfig({
       baseConfig,
@@ -629,7 +650,7 @@ export const updateGatewayAgentSkillsAllowlist = async (params: {
       payload.baseHash = baseHash;
     }
     try {
-      await params.client.call("config.set", payload);
+      await callGateway(params.client, "config.set", payload);
     } catch (err) {
       if (attempt < 1 && shouldRetryConfigWrite(err)) {
         return attemptWrite(attempt + 1);
@@ -735,7 +756,7 @@ export const updateGatewayAgentOverrides = async (params: {
   };
 
   const attemptWrite = async (attempt: number): Promise<void> => {
-    const snapshot = await params.client.call<GatewayConfigSnapshot>("config.get", {});
+    const snapshot = await callGateway<GatewayConfigSnapshot>(params.client, "config.get", {});
     const baseConfig = isRecord(snapshot.config) ? snapshot.config : {};
     const nextConfig = buildNextConfig(baseConfig);
     const payload: Record<string, unknown> = {
@@ -748,7 +769,7 @@ export const updateGatewayAgentOverrides = async (params: {
     }
     if (baseHash) payload.baseHash = baseHash;
     try {
-      await params.client.call("config.set", payload);
+      await callGateway(params.client, "config.set", payload);
     } catch (err) {
       if (attempt < 1 && shouldRetryConfigWrite(err)) {
         return attemptWrite(attempt + 1);

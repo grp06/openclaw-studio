@@ -9,6 +9,20 @@ type GatewayClientLike = {
   call: (method: string, params: unknown) => Promise<unknown>;
 };
 
+const callGateway = async <T>(
+  client: GatewayClientLike,
+  method: string,
+  params: unknown
+): Promise<T> => {
+  const invoke = (
+    client as unknown as { call?: (nextMethod: string, nextParams: unknown) => Promise<unknown> }
+  ).call;
+  if (typeof invoke !== "function") {
+    throw new Error("Gateway call transport is unavailable.");
+  }
+  return (await invoke(method, params)) as T;
+};
+
 type ReconcileCommand =
   | { kind: "clearRunTracking"; runId: string }
   | { kind: "dispatchUpdateAgent"; agentId: string; patch: Partial<AgentState> }
@@ -81,10 +95,10 @@ export const runAgentReconcileOperation = async (params: {
     if (!params.claimRunId(runId)) continue;
 
     try {
-      const result = (await params.client.call("agent.wait", {
+      const result = await callGateway<{ status?: unknown }>(params.client, "agent.wait", {
         runId,
         timeoutMs: 1,
-      })) as { status?: unknown };
+      });
       const outcome = resolveReconcileWaitOutcome(result?.status);
       if (!outcome) {
         continue;

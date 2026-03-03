@@ -771,6 +771,58 @@ describe("gateway runtime event handler (chat)", () => {
     expect(requestHistoryRefresh).not.toHaveBeenCalled();
   });
 
+  it("applies aborted terminal cleanup even when runId mismatches active run", () => {
+    const agents = [
+      createAgent({
+        status: "running",
+        runId: "run-active",
+        runStartedAt: 900,
+        streamText: "still streaming",
+        thinkingTrace: "t",
+      }),
+    ];
+    const dispatch = vi.fn();
+    const handler = createGatewayRuntimeEventHandler({
+      getStatus: () => "connected",
+      getAgents: () => agents,
+      dispatch,
+      queueLivePatch: vi.fn(),
+      clearPendingLivePatch: vi.fn(),
+      now: () => 1000,
+      loadSummarySnapshot: vi.fn(async () => {}),
+      requestHistoryRefresh: vi.fn(async () => {}),
+      refreshHeartbeatLatestUpdate: vi.fn(),
+      bumpHeartbeatTick: vi.fn(),
+      setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
+      clearTimeout: (id) => clearTimeout(id as unknown as NodeJS.Timeout),
+      isDisconnectLikeError: () => false,
+      logWarn: vi.fn(),
+      updateSpecialLatestUpdate: vi.fn(),
+    });
+
+    handler.handleEvent({
+      type: "event",
+      event: "chat",
+      payload: {
+        runId: "run-old",
+        sessionKey: agents[0]!.sessionKey,
+        state: "aborted",
+        message: { role: "assistant", content: "" },
+      },
+    });
+
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "appendOutput", agentId: "agent-1", line: "Run aborted." })
+    );
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "updateAgent",
+        agentId: "agent-1",
+        patch: expect.objectContaining({ status: "idle", runId: null }),
+      })
+    );
+  });
+
   it("handles aborted/error by appending output and clearing stream fields", () => {
     const agents = [createAgent({ status: "running", runId: "run-1", runStartedAt: 900 })];
     const dispatch = vi.fn();

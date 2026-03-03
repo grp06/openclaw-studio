@@ -31,7 +31,7 @@ export type CronPayload =
       bestEffortDeliver?: boolean;
     };
 
-export type CronJobState = {
+type CronJobState = {
   nextRunAtMs?: number;
   runningAtMs?: number;
   lastRunAtMs?: number;

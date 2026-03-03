@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Check, Copy, Eye, EyeOff, Loader2 } from "lucide-react";
-import type { GatewayStatus } from "@/lib/gateway/GatewayClient";
+import type { GatewayStatus } from "@/lib/gateway/gateway-status";
 import { isLocalGatewayUrl } from "@/lib/gateway/local-gateway";
 import type { StudioGatewaySettings } from "@/lib/studio/settings";
 

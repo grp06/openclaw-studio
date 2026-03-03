@@ -1,11 +1,11 @@
 import type { GatewayClient } from "@/lib/gateway/GatewayClient";
 
-export type SkillStatusConfigCheck = {
+type SkillStatusConfigCheck = {
   path: string;
   satisfied: boolean;
 };
 
-export type SkillRequirementSet = {
+type SkillRequirementSet = {
   bins: string[];
   anyBins: string[];
   env: string[];

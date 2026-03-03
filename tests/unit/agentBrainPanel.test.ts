@@ -1,10 +1,50 @@
 import { createElement } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import type { AgentState } from "@/features/agents/state/store";
 import { AgentBrainPanel } from "@/features/agents/components/AgentInspectPanels";
-import type { GatewayClient } from "@/lib/gateway/GatewayClient";
+import type { AgentFileName } from "@/lib/agents/agentFiles";
+
+const mockState = vi.hoisted(() => {
+  const filesByAgent: Record<string, Record<string, string>> = {
+    "agent-1": {
+      "AGENTS.md": "alpha agents",
+      "SOUL.md": "# SOUL.md - Who You Are\n\n## Core Truths\n\nBe useful.",
+      "IDENTITY.md": "# IDENTITY.md - Who Am I?\n\n- Name: Alpha\n- Creature: droid\n- Vibe: calm\n- Emoji: 🤖\n",
+      "USER.md": "# USER.md - About Your Human\n\n- Name: George\n- What to call them: GP\n\n## Context\n\nBuilding OpenClaw Studio.",
+      "TOOLS.md": "tool notes",
+      "HEARTBEAT.md": "heartbeat notes",
+      "MEMORY.md": "durable memory",
+    },
+    "agent-2": {
+      "AGENTS.md": "beta agents",
+    },
+  };
+  const readCalls: Array<{ agentId: string; name: AgentFileName }> = [];
+  const writeCalls: Array<{ agentId: string; name: AgentFileName; content: string }> = [];
+  return { filesByAgent, readCalls, writeCalls };
+});
+
+vi.mock("@/lib/controlplane/domain-runtime-client", () => ({
+  readDomainAgentFile: vi.fn(async (params: { agentId: string; name: AgentFileName }) => {
+    mockState.readCalls.push({ agentId: params.agentId, name: params.name });
+    const content = mockState.filesByAgent[params.agentId]?.[params.name];
+    if (typeof content !== "string") {
+      return { exists: false, content: "" };
+    }
+    return { exists: true, content };
+  }),
+  writeDomainAgentFile: vi.fn(
+    async (params: { agentId: string; name: AgentFileName; content: string }) => {
+      mockState.writeCalls.push(params);
+      if (!mockState.filesByAgent[params.agentId]) {
+        mockState.filesByAgent[params.agentId] = {};
+      }
+      mockState.filesByAgent[params.agentId][params.name] = params.content;
+    }
+  ),
+}));
 
 const createAgent = (agentId: string, name: string, sessionKey: string): AgentState => ({
   agentId,
@@ -41,62 +81,17 @@ const createAgent = (agentId: string, name: string, sessionKey: string): AgentSt
   avatarUrl: null,
 });
 
-const createMockClient = () => {
-  const filesByAgent: Record<string, Record<string, string>> = {
-    "agent-1": {
-      "AGENTS.md": "alpha agents",
-      "SOUL.md": "# SOUL.md - Who You Are\n\n## Core Truths\n\nBe useful.",
-      "IDENTITY.md": "# IDENTITY.md - Who Am I?\n\n- Name: Alpha\n- Creature: droid\n- Vibe: calm\n- Emoji: 🤖\n",
-      "USER.md": "# USER.md - About Your Human\n\n- Name: George\n- What to call them: GP\n\n## Context\n\nBuilding OpenClaw Studio.",
-      "TOOLS.md": "tool notes",
-      "HEARTBEAT.md": "heartbeat notes",
-      "MEMORY.md": "durable memory",
-    },
-    "agent-2": {
-      "AGENTS.md": "beta agents",
-    },
-  };
-
-  const calls: Array<{ method: string; params: unknown }> = [];
-
-  const client = {
-    call: vi.fn(async (method: string, params: unknown) => {
-      calls.push({ method, params });
-      if (method === "agents.files.get") {
-        const record = params && typeof params === "object" ? (params as Record<string, unknown>) : {};
-        const agentId = typeof record.agentId === "string" ? record.agentId : "";
-        const name = typeof record.name === "string" ? record.name : "";
-        const content = filesByAgent[agentId]?.[name];
-        if (typeof content !== "string") {
-          return { file: { name, missing: true } };
-        }
-        return { file: { name, missing: false, content } };
-      }
-      if (method === "agents.files.set") {
-        const record = params && typeof params === "object" ? (params as Record<string, unknown>) : {};
-        const agentId = typeof record.agentId === "string" ? record.agentId : "";
-        const name = typeof record.name === "string" ? record.name : "";
-        const content = typeof record.content === "string" ? record.content : "";
-        if (!filesByAgent[agentId]) {
-          filesByAgent[agentId] = {};
-        }
-        filesByAgent[agentId][name] = content;
-        return { ok: true };
-      }
-      return {};
-    }),
-  } as unknown as GatewayClient;
-
-  return { client, calls, filesByAgent };
-};
-
 describe("AgentBrainPanel", () => {
+  beforeEach(() => {
+    mockState.readCalls.length = 0;
+    mockState.writeCalls.length = 0;
+  });
+
   afterEach(() => {
     cleanup();
   });
 
   it("renders_behavior_sections_and_loads_agent_files", async () => {
-    const { client } = createMockClient();
     const agents = [
       createAgent("agent-1", "Alpha", "session-1"),
       createAgent("agent-2", "Beta", "session-2"),
@@ -104,7 +99,7 @@ describe("AgentBrainPanel", () => {
 
     render(
       createElement(AgentBrainPanel, {
-        client,
+        gatewayStatus: "connected",
         agents,
         selectedAgentId: "agent-1",
       })
@@ -125,12 +120,11 @@ describe("AgentBrainPanel", () => {
   });
 
   it("shows_actionable_message_when_session_key_missing", async () => {
-    const { client } = createMockClient();
     const agents = [createAgent("", "Alpha", "session-1")];
 
     render(
       createElement(AgentBrainPanel, {
-        client,
+        gatewayStatus: "connected",
         agents,
         selectedAgentId: "",
       })
@@ -142,12 +136,11 @@ describe("AgentBrainPanel", () => {
   });
 
   it("saves_updated_behavior_files", async () => {
-    const { client, calls, filesByAgent } = createMockClient();
     const agents = [createAgent("agent-1", "Alpha", "session-1")];
 
     render(
       createElement(AgentBrainPanel, {
-        client,
+        gatewayStatus: "connected",
         agents,
         selectedAgentId: "agent-1",
       })
@@ -166,18 +159,17 @@ describe("AgentBrainPanel", () => {
     fireEvent.click(saveButton);
 
     await waitFor(() => {
-      expect(calls.some((entry) => entry.method === "agents.files.set")).toBe(true);
+      expect(mockState.writeCalls.length).toBeGreaterThan(0);
     });
-    expect(filesByAgent["agent-1"]["AGENTS.md"]).toBe("alpha directives updated");
+    expect(mockState.filesByAgent["agent-1"]["AGENTS.md"]).toBe("alpha directives updated");
   });
 
   it("discards_unsaved_changes_without_writing_files", async () => {
-    const { client, calls } = createMockClient();
     const agents = [createAgent("agent-1", "Alpha", "session-1")];
 
     render(
       createElement(AgentBrainPanel, {
-        client,
+        gatewayStatus: "connected",
         agents,
         selectedAgentId: "agent-1",
       })
@@ -194,16 +186,15 @@ describe("AgentBrainPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(screen.getByLabelText("Name")).toHaveValue("Alpha");
-    expect(calls.some((entry) => entry.method === "agents.files.set")).toBe(false);
+    expect(mockState.writeCalls.length).toBe(0);
   });
 
   it("does_not_render_name_editor_in_personality_panel", async () => {
-    const { client } = createMockClient();
     const agents = [createAgent("agent-1", "Alpha", "session-1")];
 
     render(
       createElement(AgentBrainPanel, {
-        client,
+        gatewayStatus: "connected",
         agents,
         selectedAgentId: "agent-1",
       })
@@ -214,5 +205,34 @@ describe("AgentBrainPanel", () => {
     });
     expect(screen.queryByLabelText("Agent name")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Update Name" })).not.toBeInTheDocument();
+  });
+
+  it("loads_files_after_gateway_connects", async () => {
+    const agents = [createAgent("agent-1", "Alpha", "session-1")];
+
+    const view = render(
+      createElement(AgentBrainPanel, {
+        gatewayStatus: "connecting",
+        agents,
+        selectedAgentId: "agent-1",
+      })
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Persona" })).toBeInTheDocument();
+    });
+    expect(mockState.readCalls.length).toBe(0);
+
+    view.rerender(
+      createElement(AgentBrainPanel, {
+        gatewayStatus: "connected",
+        agents,
+        selectedAgentId: "agent-1",
+      })
+    );
+
+    await waitFor(() => {
+      expect(mockState.readCalls.length).toBeGreaterThan(0);
+    });
   });
 });

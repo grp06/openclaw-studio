@@ -16,10 +16,8 @@ import { EmptyStatePanel } from "@/features/agents/components/EmptyStatePanel";
 import {
   isHeartbeatPrompt,
 } from "@/lib/text/message-extract";
-import {
-  useGatewayConnection,
-  type GatewayStatus,
-} from "@/lib/gateway/GatewayClient";
+import { useStudioGatewaySettings } from "@/lib/studio/useStudioGatewaySettings";
+import type { GatewayStatus } from "@/lib/gateway/gateway-status";
 import type { ControlPlaneOutboxEntry } from "@/lib/controlplane/contracts";
 import {
   type GatewayModelChoice,
@@ -37,7 +35,6 @@ import { createGatewayRuntimeEventHandler } from "@/features/agents/state/gatewa
 import {
   type CronJobSummary,
   formatCronJobDisplay,
-  listCronJobs,
   resolveLatestCronJobForAgent,
 } from "@/lib/cron/types";
 import {
@@ -51,8 +48,8 @@ import { applySessionSettingMutation } from "@/features/agents/state/sessionSett
 import type { AgentCreateModalSubmitPayload } from "@/features/agents/creation/types";
 import {
   isGatewayDisconnectLikeError,
-  type EventFrame,
-} from "@/lib/gateway/GatewayClient";
+} from "@/lib/gateway/gateway-disconnect";
+import type { EventFrame } from "@/lib/gateway/gateway-frames";
 import {
   useConfigMutationQueue,
   type ConfigMutationKind,
@@ -115,6 +112,11 @@ import {
   type SettingsRouteTab,
 } from "@/features/agents/operations/settingsRouteWorkflow";
 import { useSettingsRouteController } from "@/features/agents/operations/useSettingsRouteController";
+import {
+  loadDomainChatHistory,
+  listDomainCronJobs,
+  listDomainSessions,
+} from "@/lib/controlplane/domain-runtime-client";
 const PENDING_EXEC_APPROVAL_PRUNE_GRACE_MS = 500;
 
 type MobilePane = "fleet" | "chat";
@@ -227,10 +229,12 @@ const AgentStudioPage = () => {
     useLocalGatewayDefaults,
     setGatewayUrl,
     setToken,
-  } = useGatewayConnection(settingsCoordinator);
-  const useDomainApiMode = domainApiModeEnabled === true;
-  const coreConnected = useDomainApiMode ? true : status === "connected";
-  const coreStatus: GatewayStatus = coreConnected ? "connected" : status;
+  } = useStudioGatewaySettings(settingsCoordinator);
+  const useDomainApiMode = domainApiModeEnabled;
+  const gatewayStatus: GatewayStatus = status;
+  const gatewayConnected = gatewayStatus === "connected";
+  const coreConnected = useDomainApiMode ? true : gatewayConnected;
+  const coreStatus: GatewayStatus = useDomainApiMode ? "connected" : gatewayStatus;
   const runtimeWriteTransport = useMemo(
     () =>
       createRuntimeWriteTransport({
@@ -452,9 +456,36 @@ const AgentStudioPage = () => {
   }, []);
 
   const specialLatestUpdate = useMemo(() => {
+    const callGateway = async (method: string, params: unknown): Promise<unknown> => {
+      if (method === "sessions.list") {
+        const body = (params ?? {}) as {
+          agentId?: string;
+          includeGlobal?: boolean;
+          includeUnknown?: boolean;
+          search?: string;
+          limit?: number;
+        };
+        return await listDomainSessions({
+          agentId: body.agentId ?? "",
+          includeGlobal: body.includeGlobal,
+          includeUnknown: body.includeUnknown,
+          search: body.search,
+          limit: body.limit,
+        });
+      }
+      if (method === "chat.history") {
+        const body = (params ?? {}) as { sessionKey?: string; limit?: number };
+        return await loadDomainChatHistory({
+          sessionKey: body.sessionKey ?? "",
+          limit: body.limit,
+        });
+      }
+      throw new Error(`Unsupported special latest-update method in domain mode: ${method}`);
+    };
+
     return createSpecialLatestUpdateOperation({
-      callGateway: (method, params) => client.call(method, params),
-      listCronJobs: () => listCronJobs(client, { includeDisabled: true }),
+      callGateway,
+      listCronJobs: () => listDomainCronJobs({ includeDisabled: true }),
       resolveCronJobForAgent,
       formatCronJobDisplay,
       dispatchUpdateAgent: (agentId, patch) => {
@@ -463,7 +494,7 @@ const AgentStudioPage = () => {
       isDisconnectLikeError: isGatewayDisconnectLikeError,
       logError: (message) => console.error(message),
     });
-  }, [client, dispatch, resolveCronJobForAgent]);
+  }, [dispatch, resolveCronJobForAgent]);
 
   const refreshHeartbeatLatestUpdate = useCallback(() => {
     const agents = stateRef.current.agents;
@@ -520,7 +551,8 @@ const AgentStudioPage = () => {
 
   const { refreshGatewayConfigSnapshot } = useGatewayConfigSyncController({
     client,
-    status,
+    status: gatewayStatus,
+    useDomainApiReads: useDomainApiMode,
     settingsRouteActive,
     inspectSidebarAgentId,
     gatewayConfigSnapshot,
@@ -535,7 +567,7 @@ const AgentStudioPage = () => {
   const settingsMutationController = useAgentSettingsMutationController({
     client,
     runtimeWriteTransport,
-    status,
+    status: gatewayStatus,
     isLocalGateway,
     agents,
     hasCreateBlock: Boolean(createAgentBlock),
@@ -583,7 +615,7 @@ const AgentStudioPage = () => {
     queuedBlockedByRunningAgents,
     activeConfigMutation,
   } = useConfigMutationQueue({
-    status: coreStatus,
+    status: gatewayStatus,
     hasRunningAgents,
     hasRestartBlockInProgress,
   });
@@ -661,7 +693,7 @@ const AgentStudioPage = () => {
   useEffect(() => {
     const commands = runStudioFocusedSelectionPersistenceOperation({
       gatewayUrl,
-      status,
+      status: coreStatus,
       focusedPreferencesLoaded,
       agentsLoadedOnce,
       selectedAgentId: state.selectedAgentId,
@@ -675,7 +707,7 @@ const AgentStudioPage = () => {
     focusedPreferencesLoaded,
     gatewayUrl,
     settingsCoordinator,
-    status,
+    coreStatus,
     state.selectedAgentId,
   ]);
 
@@ -814,7 +846,7 @@ const AgentStudioPage = () => {
   } = useChatInteractionController({
     client,
     runtimeWriteTransport,
-    status: coreStatus,
+    status: gatewayStatus,
     agents,
     dispatch,
     setError,
@@ -854,7 +886,7 @@ const AgentStudioPage = () => {
   } = useSettingsRouteController({
     settingsRouteActive,
     settingsRouteAgentId,
-    status: coreStatus,
+    status: gatewayStatus,
     agentsLoadedOnce,
     selectedAgentId: state.selectedAgentId,
     focusedAgentId: focusedAgent?.agentId ?? null,
@@ -918,7 +950,7 @@ const AgentStudioPage = () => {
       await runCreateAgentMutationLifecycle(
         {
           payload,
-          status: coreStatus,
+          status: gatewayStatus,
           hasCreateBlock: Boolean(createAgentBlock),
           hasRenameBlock: hasRenameMutationBlock,
           hasDeleteBlock: hasDeleteMutationBlock,
@@ -1019,7 +1051,7 @@ const AgentStudioPage = () => {
       refreshGatewayConfigSnapshot,
       runtimeWriteTransport,
       setError,
-      coreStatus,
+      gatewayStatus,
     ]
   );
 
@@ -1158,7 +1190,7 @@ const AgentStudioPage = () => {
   const pauseRunForExecApproval = useCallback(
     async (approval: PendingExecApproval, preferredAgentId?: string | null) => {
       await runPauseRunForExecApprovalOperation({
-        status: coreStatus,
+        status: gatewayStatus,
         runtimeWriteTransport,
         approval,
         preferredAgentId: preferredAgentId ?? null,
@@ -1168,7 +1200,7 @@ const AgentStudioPage = () => {
         logWarn: (message, error) => console.warn(message, error),
       });
     },
-    [coreStatus, runtimeWriteTransport]
+    [gatewayStatus, runtimeWriteTransport]
   );
 
   const handleGatewayEventIngress = useCallback(
@@ -1243,49 +1275,39 @@ const AgentStudioPage = () => {
       pendingDomainOutboxEntriesRef.current = [];
       ingestDomainOutboxEntries(pendingEntries);
     }
-    let unsubscribeGatewayEvents: (() => void) | null = null;
     let stream: EventSource | null = null;
-    if (useDomainApiMode) {
-      stream = new EventSource("/api/runtime/stream");
-      stream.addEventListener("gateway.event", (raw) => {
-        const message = raw as MessageEvent<string>;
-        try {
-          const parsed = JSON.parse(message.data) as {
-            event?: string;
-            payload?: unknown;
-            seq?: number;
-          };
-          if (typeof parsed.event !== "string") return;
-          const frame: EventFrame = {
-            type: "event",
-            event: parsed.event,
-            payload: parsed.payload,
-            ...(typeof parsed.seq === "number" ? { seq: parsed.seq } : {}),
-          };
-          handler.handleEvent(frame);
-          handleGatewayEventIngress(frame);
-        } catch {}
-      });
-      stream.addEventListener("runtime.status", () => {
-        void loadSummarySnapshot();
-      });
-      stream.onerror = () => {
-        // EventSource performs automatic reconnect; keep warning low-noise.
-      };
-    } else {
-      unsubscribeGatewayEvents = client.onEvent((event: EventFrame) => {
-        handler.handleEvent(event);
-        handleGatewayEventIngress(event);
-      });
-    }
+    stream = new EventSource("/api/runtime/stream");
+    stream.addEventListener("gateway.event", (raw) => {
+      const message = raw as MessageEvent<string>;
+      try {
+        const parsed = JSON.parse(message.data) as {
+          event?: string;
+          payload?: unknown;
+          seq?: number;
+        };
+        if (typeof parsed.event !== "string") return;
+        const frame: EventFrame = {
+          type: "event",
+          event: parsed.event,
+          payload: parsed.payload,
+          ...(typeof parsed.seq === "number" ? { seq: parsed.seq } : {}),
+        };
+        handler.handleEvent(frame);
+        handleGatewayEventIngress(frame);
+      } catch {}
+    });
+    stream.addEventListener("runtime.status", () => {
+      void loadSummarySnapshot();
+    });
+    stream.onerror = () => {
+      // EventSource performs automatic reconnect; keep warning low-noise.
+    };
     return () => {
       runtimeEventHandlerRef.current = null;
       handler.dispose();
-      unsubscribeGatewayEvents?.();
       stream?.close();
     };
   }, [
-    client,
     dispatch,
     loadAgentHistory,
     loadSummarySnapshot,
@@ -1295,7 +1317,6 @@ const AgentStudioPage = () => {
     specialLatestUpdate,
     handleGatewayEventIngress,
     ingestDomainOutboxEntries,
-    useDomainApiMode,
     coreStatus,
   ]);
 
@@ -1319,7 +1340,7 @@ const AgentStudioPage = () => {
     : queuedConfigMutationCount > 0
       ? queuedBlockedByRunningAgents
         ? `Queued ${queuedConfigMutationCount} config change${queuedConfigMutationCount === 1 ? "" : "s"}; waiting for ${runningAgentCount} running agent${runningAgentCount === 1 ? "" : "s"} to finish`
-        : !coreConnected
+        : !gatewayConnected
           ? `Queued ${queuedConfigMutationCount} config change${queuedConfigMutationCount === 1 ? "" : "s"}; waiting for gateway connection`
           : `Queued ${queuedConfigMutationCount} config change${queuedConfigMutationCount === 1 ? "" : "s"}`
       : null;
@@ -1337,7 +1358,7 @@ const AgentStudioPage = () => {
           sawDisconnect: restartingMutationBlock.sawDisconnect,
         }
       : null,
-    status,
+    status: gatewayStatus,
   });
   const restartingMutationModalTestId = restartingMutationBlock
     ? restartingMutationBlock.kind === "delete-agent"
@@ -1389,7 +1410,7 @@ const AgentStudioPage = () => {
       <div className="relative min-h-screen w-screen overflow-hidden bg-background">
         <div className="relative z-10 flex h-screen flex-col">
           <HeaderBar
-            status={status}
+            status={gatewayStatus}
             onConnectionSettings={() => setShowConnectionPanel(true)}
           />
           <div className="flex min-h-0 flex-1 flex-col gap-4 px-3 pb-3 pt-3 sm:px-4 sm:pb-4 sm:pt-4 md:px-6 md:pb-6 md:pt-4">
@@ -1408,7 +1429,7 @@ const AgentStudioPage = () => {
               gatewayUrl={gatewayUrl}
               token={token}
               localGatewayDefaults={localGatewayDefaults}
-              status={status}
+              status={gatewayStatus}
               error={gatewayError}
               onGatewayUrlChange={setGatewayUrl}
               onTokenChange={setToken}
@@ -1447,7 +1468,7 @@ const AgentStudioPage = () => {
       ) : null}
       <div className="relative z-10 flex h-screen flex-col">
         <HeaderBar
-          status={status}
+          status={gatewayStatus}
           onConnectionSettings={() => setShowConnectionPanel(true)}
         />
         <div className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3 pt-2 sm:px-4 sm:pb-4 sm:pt-3 md:px-5 md:pb-5 md:pt-3">
@@ -1457,7 +1478,7 @@ const AgentStudioPage = () => {
                 <ConnectionPanel
                   gatewayUrl={gatewayUrl}
                   token={token}
-                  status={status}
+                  status={gatewayStatus}
                   error={gatewayError}
                   onGatewayUrlChange={setGatewayUrl}
                   onTokenChange={setToken}
@@ -1557,7 +1578,7 @@ const AgentStudioPage = () => {
                   {inspectSidebarAgent ? (
                     effectiveSettingsTab === "personality" ? (
                       <AgentBrainPanel
-                        client={client}
+                        gatewayStatus={gatewayStatus}
                         agents={agents}
                         selectedAgentId={inspectSidebarAgent.agentId}
                         onUnsavedChangesChange={setPersonalityHasUnsavedChanges}
@@ -1707,7 +1728,7 @@ const AgentStudioPage = () => {
                   onCreateAgent={() => {
                     handleOpenCreateAgentModal();
                   }}
-                  createDisabled={!coreConnected || createAgentBusy || state.loading}
+                  createDisabled={!gatewayConnected || createAgentBusy || state.loading}
                   createBusy={createAgentBusy}
                   onSelectAgent={handleFleetSelectAgent}
                 />
@@ -1722,7 +1743,7 @@ const AgentStudioPage = () => {
                       <AgentChatPanel
                         agent={focusedAgent}
                         isSelected={false}
-                        canSend={coreConnected}
+                        canSend={gatewayConnected}
                         models={gatewayModels}
                         stopBusy={stopBusyAgentId === focusedAgent.agentId}
                         stopDisabledReason={focusedAgentStopDisabledReason}
@@ -1751,7 +1772,13 @@ const AgentStudioPage = () => {
                         onRemoveQueuedMessage={(index) =>
                           removeQueuedMessage(focusedAgent.agentId, index)
                         }
-                        onStopRun={() => handleStopRun(focusedAgent.agentId, focusedAgent.sessionKey)}
+                        onStopRun={() =>
+                          handleStopRun(
+                            focusedAgent.agentId,
+                            focusedAgent.sessionKey,
+                            focusedAgent.runId
+                          )
+                        }
                         onAvatarShuffle={() => handleAvatarShuffle(focusedAgent.agentId)}
                         pendingExecApprovals={focusedPendingExecApprovals}
                         onResolveExecApproval={(id, decision) => {
@@ -1766,7 +1793,7 @@ const AgentStudioPage = () => {
                     description={
                       hasAnyAgents
                         ? undefined
-                        : coreConnected
+                        : gatewayConnected
                           ? "Use New Agent in the sidebar to add your first agent."
                           : "Connect to your gateway to load agents into the studio."
                     }

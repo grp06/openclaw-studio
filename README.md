@@ -78,12 +78,10 @@ Notes:
 
 ## How It Connects (Mental Model)
 
-In domain API mode (default), there are **two primary paths**:
+OpenClaw Studio now runs one runtime architecture with **two primary paths**:
 
 1. Browser -> Studio: HTTP + SSE (`/api/runtime/*`, `/api/intents/*`, `/api/runtime/stream`)
 2. Studio -> Gateway (upstream): one server-owned WebSocket opened by the Studio Node process
-
-The legacy browser WebSocket bridge (`/api/gateway/ws`) is still available for compatibility/diagnostics when domain mode is disabled.
 
 This is why `ws://localhost:18789` means “gateway on the Studio host”, not “gateway on your phone”.
 
@@ -103,7 +101,7 @@ Paths and key settings:
 - Studio settings: `~/.openclaw/openclaw-studio/settings.json`
 - Control-plane runtime DB: `~/.openclaw/openclaw-studio/runtime.db`
 - Default gateway URL: `ws://localhost:18789` (override via Studio Settings or `NEXT_PUBLIC_GATEWAY_URL`)
-- Domain API mode toggle: `STUDIO_DOMAIN_API_MODE` (server) or `NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE` fallback. The UI reads the effective value from `/api/studio` (`domainApiModeEnabled`) and uses that server-reported value for runtime routing.
+- Domain API mode: always enabled. Studio runs on the server-owned control-plane architecture.
 - `STUDIO_ACCESS_TOKEN`: required when binding Studio to a public host (`HOST=0.0.0.0`, `HOST=::`, or non-loopback hostnames/IPs); optional for loopback-only binds (`127.0.0.1`, `::1`, `localhost`)
 
 Startup guard behavior:
@@ -120,7 +118,7 @@ See `docs/ui-guide.md` for UI workflows (agent creation, cron jobs, exec approva
 
 ## PI + chat streaming
 
-See `docs/pi-chat-streaming.md` for how Studio bridges browser WebSocket traffic to the upstream Gateway, how runtime streaming arrives (`chat`/`agent` events), and how the chat UI renders tool calls, thinking traces, and final transcript lines.
+See `docs/pi-chat-streaming.md` for how Studio streams runtime events over domain SSE (`/api/runtime/stream`), applies replay/history, and renders tool calls, thinking traces, and final transcript lines.
 
 ## Permissions + sandboxing
 
@@ -141,6 +139,10 @@ If the UI loads but “Connect” fails, it’s usually Studio->Gateway:
 
 If startup fails with `better_sqlite3.node` / `NODE_MODULE_VERSION` mismatch:
 - Run `npm run verify:native-runtime:repair`
+- Confirm `node` and `npm` point at the same runtime before launching Studio:
+  - `node -v && node -p "process.versions.modules"`
+  - `which node && which npm`
+  - If they differ (for example Homebrew `npm` + `nvm` `node`), run `nvm use` in that terminal first.
 - If it still fails, run:
   - `npm rebuild better-sqlite3`
   - `npm install`

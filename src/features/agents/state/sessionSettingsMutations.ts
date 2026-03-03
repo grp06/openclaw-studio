@@ -1,9 +1,11 @@
 import {
-  isWebchatSessionMutationBlockedError,
-  syncGatewaySessionSettings,
   type GatewayClient,
-  type GatewaySessionsPatchResult,
 } from "@/lib/gateway/GatewayClient";
+import { isWebchatSessionMutationBlockedError } from "@/lib/gateway/gateway-disconnect";
+import {
+  syncGatewaySessionSettings,
+  type GatewaySessionsPatchResult,
+} from "@/lib/gateway/session-settings-sync";
 import type { RuntimeWriteTransport } from "@/features/agents/operations/runtimeWriteTransport";
 
 type SessionSettingField = "model" | "thinkingLevel";

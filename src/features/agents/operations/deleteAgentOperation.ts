@@ -137,7 +137,7 @@ export const deleteAgentViaStudio = async (params: {
     {
       trashAgentState: async (agentId) => {
         const { result } = await fetchJson<{ result: TrashAgentStateResult }>(
-          "/api/gateway/agent-state",
+          "/api/runtime/agent-state",
           {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -148,7 +148,7 @@ export const deleteAgentViaStudio = async (params: {
       },
       restoreAgentState: async (agentId, trashDir) => {
         const { result } = await fetchJson<{ result: RestoreAgentStateResult }>(
-          "/api/gateway/agent-state",
+          "/api/runtime/agent-state",
           {
             method: "PUT",
             headers: { "content-type": "application/json" },

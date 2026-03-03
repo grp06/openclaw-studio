@@ -38,6 +38,7 @@ describe("OpenClawGatewayAdapter", () => {
     const upstreamUrl = `ws://127.0.0.1:${address.port}`;
     let observedConnectClientId: string | null = null;
     let observedConnectClientMode: string | null = null;
+    let observedConnectCaps: string[] | null = null;
 
     upstream.on("connection", (ws) => {
       ws.send(JSON.stringify({ type: "event", event: "connect.challenge", payload: {} }));
@@ -47,11 +48,13 @@ describe("OpenClawGatewayAdapter", () => {
           method?: string;
           params?: {
             client?: { id?: string; mode?: string };
+            caps?: string[];
           };
         };
         if (parsed?.method === "connect") {
           observedConnectClientId = parsed.params?.client?.id ?? null;
           observedConnectClientMode = parsed.params?.client?.mode ?? null;
+          observedConnectCaps = Array.isArray(parsed.params?.caps) ? parsed.params.caps : null;
           ws.send(
             JSON.stringify({
               type: "res",
@@ -80,6 +83,7 @@ describe("OpenClawGatewayAdapter", () => {
     expect(Date.now() - startedAt).toBeLessThan(2_000);
     expect(observedConnectClientId).toBe("openclaw-control-ui");
     expect(observedConnectClientMode).toBe("webchat");
+    expect(observedConnectCaps).toEqual(expect.arrayContaining(["tool-events"]));
 
     await adapter.stop();
   });

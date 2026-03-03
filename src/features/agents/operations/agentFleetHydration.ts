@@ -13,6 +13,20 @@ type GatewayClientLike = {
   call: (method: string, params: unknown) => Promise<unknown>;
 };
 
+const callGateway = async <T>(
+  client: GatewayClientLike,
+  method: string,
+  params: unknown
+): Promise<T> => {
+  const invoke = (
+    client as unknown as { call?: (nextMethod: string, nextParams: unknown) => Promise<unknown> }
+  ).call;
+  if (typeof invoke !== "function") {
+    throw new Error("Gateway call transport is unavailable.");
+  }
+  return (await invoke(method, params)) as T;
+};
+
 type AgentsListResult = {
   defaultId: string;
   mainKey: string;
@@ -75,10 +89,11 @@ export async function hydrateAgentFleetFromGateway(params: {
   let configSnapshot = params.cachedConfigSnapshot;
   if (!configSnapshot) {
     try {
-      configSnapshot = (await params.client.call(
+      configSnapshot = await callGateway<GatewayModelPolicySnapshot>(
+        params.client,
         "config.get",
         {}
-      )) as GatewayModelPolicySnapshot;
+      );
     } catch (err) {
       if (!params.isDisconnectLikeError(err)) {
         logError("Failed to load gateway config while loading agents.", err);
@@ -98,17 +113,18 @@ export async function hydrateAgentFleetFromGateway(params: {
 
   let execApprovalsSnapshot: ExecApprovalsSnapshot | null = null;
   try {
-    execApprovalsSnapshot = (await params.client.call(
+    execApprovalsSnapshot = await callGateway<ExecApprovalsSnapshot>(
+      params.client,
       "exec.approvals.get",
       {}
-    )) as ExecApprovalsSnapshot;
+    );
   } catch (err) {
     if (!params.isDisconnectLikeError(err)) {
       logError("Failed to load exec approvals while loading agents.", err);
     }
   }
 
-  const agentsResult = (await params.client.call("agents.list", {})) as AgentsListResult;
+  const agentsResult = await callGateway<AgentsListResult>(params.client, "agents.list", {});
   const mainKey = agentsResult.mainKey?.trim() || "main";
 
   const mainSessionKeyByAgent = new Map<string, SessionsListEntry | null>();
@@ -116,13 +132,13 @@ export async function hydrateAgentFleetFromGateway(params: {
     agentsResult.agents.map(async (agent) => {
       try {
         const expectedMainKey = buildAgentMainSessionKey(agent.id, mainKey);
-        const sessions = (await params.client.call("sessions.list", {
+        const sessions = await callGateway<SessionsListResult>(params.client, "sessions.list", {
           agentId: agent.id,
           includeGlobal: false,
           includeUnknown: false,
           search: expectedMainKey,
           limit: 4,
-        })) as SessionsListResult;
+        });
         const entries = Array.isArray(sessions.sessions) ? sessions.sessions : [];
         const mainEntry =
           entries.find((entry) => isSameSessionKey(entry.key ?? "", expectedMainKey)) ?? null;
@@ -149,12 +165,12 @@ export async function hydrateAgentFleetFromGateway(params: {
     ).slice(0, 64);
     if (sessionKeys.length > 0) {
       const snapshot = await Promise.all([
-        params.client.call("status", {}) as Promise<SummaryStatusSnapshot>,
-        params.client.call("sessions.preview", {
+        callGateway<SummaryStatusSnapshot>(params.client, "status", {}),
+        callGateway<SummaryPreviewSnapshot>(params.client, "sessions.preview", {
           keys: sessionKeys,
           limit: 8,
           maxChars: 240,
-        }) as Promise<SummaryPreviewSnapshot>,
+        }),
       ]);
       statusSummary = snapshot[0] ?? null;
       previewResult = snapshot[1] ?? null;

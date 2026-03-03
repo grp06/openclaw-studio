@@ -141,30 +141,17 @@ describe("control-plane runtime", () => {
     expect(a).toBe(b);
   });
 
-  it("parses STUDIO_DOMAIN_API_MODE values", () => {
+  it("always enables domain mode", () => {
     delete process.env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE;
     process.env.STUDIO_DOMAIN_API_MODE = "true";
     expect(isStudioDomainApiModeEnabled()).toBe(true);
     process.env.STUDIO_DOMAIN_API_MODE = "1";
     expect(isStudioDomainApiModeEnabled()).toBe(true);
     process.env.STUDIO_DOMAIN_API_MODE = "false";
-    expect(isStudioDomainApiModeEnabled()).toBe(false);
+    expect(isStudioDomainApiModeEnabled()).toBe(true);
     delete process.env.STUDIO_DOMAIN_API_MODE;
     expect(isStudioDomainApiModeEnabled()).toBe(true);
-  });
-
-  it("falls back to NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE when server mode is unset", () => {
-    delete process.env.STUDIO_DOMAIN_API_MODE;
     process.env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE = "false";
-    expect(isStudioDomainApiModeEnabled()).toBe(false);
-
-    process.env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE = "true";
     expect(isStudioDomainApiModeEnabled()).toBe(true);
-  });
-
-  it("prefers STUDIO_DOMAIN_API_MODE over NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE", () => {
-    process.env.STUDIO_DOMAIN_API_MODE = "false";
-    process.env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE = "true";
-    expect(isStudioDomainApiModeEnabled()).toBe(false);
   });
 });

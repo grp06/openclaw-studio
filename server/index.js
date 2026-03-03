@@ -2,12 +2,12 @@ process.env.WS_NO_BUFFER_UTIL = process.env.WS_NO_BUFFER_UTIL || "1";
 process.env.WS_NO_UTF_8_VALIDATE = process.env.WS_NO_UTF_8_VALIDATE || "1";
 
 const http = require("node:http");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const next = require("next");
 
 const { createAccessGate } = require("./access-gate");
-const { createGatewayProxy } = require("./gateway-proxy");
 const { assertPublicHostAllowed, resolveHosts } = require("./network-policy");
-const { loadUpstreamGatewaySettings } = require("./studio-settings");
 
 const resolvePort = () => {
   const raw = process.env.PORT?.trim() || "3000";
@@ -16,14 +16,24 @@ const resolvePort = () => {
   return port;
 };
 
-const resolvePathname = (url) => {
-  const raw = typeof url === "string" ? url : "";
-  const idx = raw.indexOf("?");
-  return (idx === -1 ? raw : raw.slice(0, idx)) || "/";
+const verifyNativeRuntime = (dev) => {
+  if (process.env.OPENCLAW_SKIP_NATIVE_RUNTIME_VERIFY === "1") return;
+  const scriptPath = path.resolve(__dirname, "..", "scripts", "verify-native-runtime.mjs");
+  const modeArg = dev ? "--repair" : "--check";
+  const result = spawnSync(process.execPath, [scriptPath, modeArg], {
+    stdio: "inherit",
+    env: process.env,
+  });
+  if (result.status === 0) return;
+  if (typeof result.status === "number" && result.status !== 0) {
+    process.exit(result.status);
+  }
+  throw result.error ?? new Error("Failed to verify native runtime dependencies.");
 };
 
 async function main() {
   const dev = process.argv.includes("--dev");
+  verifyNativeRuntime(dev);
   const hostnames = Array.from(new Set(resolveHosts(process.env)));
   const hostname = hostnames[0] ?? "127.0.0.1";
   const port = resolvePort();
@@ -46,27 +56,7 @@ async function main() {
     token: process.env.STUDIO_ACCESS_TOKEN,
   });
 
-  const proxy = createGatewayProxy({
-    loadUpstreamSettings: async () => {
-      const settings = loadUpstreamGatewaySettings(process.env);
-      return { url: settings.url, token: settings.token };
-    },
-    allowWs: (req) => {
-      if (resolvePathname(req.url) !== "/api/gateway/ws") return false;
-      if (!accessGate.allowUpgrade(req)) return false;
-      return true;
-    },
-  });
-
   await app.prepare();
-  const handleUpgrade = app.getUpgradeHandler();
-  const handleServerUpgrade = (req, socket, head) => {
-    if (resolvePathname(req.url) === "/api/gateway/ws") {
-      proxy.handleUpgrade(req, socket, head);
-      return;
-    }
-    handleUpgrade(req, socket, head);
-  };
 
   const createServer = () =>
     http.createServer((req, res) => {
@@ -75,21 +65,6 @@ async function main() {
     });
 
   const servers = hostnames.map(() => createServer());
-
-  const attachUpgradeHandlers = (server) => {
-    server.on("upgrade", handleServerUpgrade);
-    server.on("newListener", (eventName, listener) => {
-      if (eventName !== "upgrade") return;
-      if (listener === handleServerUpgrade) return;
-      process.nextTick(() => {
-        server.removeListener("upgrade", listener);
-      });
-    });
-  };
-
-  for (const server of servers) {
-    attachUpgradeHandlers(server);
-  }
 
   const listenOnHost = (server, host) =>
     new Promise((resolve, reject) => {

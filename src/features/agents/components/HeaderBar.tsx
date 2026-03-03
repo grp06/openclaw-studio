@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
-import type { GatewayStatus } from "@/lib/gateway/GatewayClient";
+import type { GatewayStatus } from "@/lib/gateway/gateway-status";
 import { Plug } from "lucide-react";
 import { resolveGatewayStatusBadgeClass } from "./colorSemantics";
 

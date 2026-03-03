@@ -3,13 +3,13 @@ export type StudioGatewaySettings = {
   token: string;
 };
 
-export type StudioGatewaySettingsPatch = {
+type StudioGatewaySettingsPatch = {
   url?: string | null;
   token?: string | null;
 };
 
-export type FocusFilter = "all" | "running" | "approvals";
-export type StudioViewMode = "focused";
+type FocusFilter = "all" | "running" | "approvals";
+type StudioViewMode = "focused";
 
 export type StudioFocusedPreference = {
   mode: StudioViewMode;

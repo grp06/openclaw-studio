@@ -303,7 +303,7 @@ describe("useAgentSettingsMutationController", () => {
     expect(mockedDeleteAgentViaStudio).not.toHaveBeenCalled();
   });
 
-  it("domain_mode_allows_delete_when_browser_gateway_is_disconnected", async () => {
+  it("domain_mode_delete_is_blocked_when_gateway_is_disconnected", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     mockedRunLifecycle.mockImplementation(async ({ deps }) => {
       deps.setQueuedBlock();
@@ -320,13 +320,9 @@ describe("useAgentSettingsMutationController", () => {
       await ctx.getValue().handleDeleteAgent("agent-1");
     });
 
-    expect(mockedRunLifecycle).toHaveBeenCalled();
-    expect(mockedDeleteAgentViaStudio).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentId: "agent-1",
-        runtimeWriteTransport: expect.anything(),
-      })
-    );
+    expect(mockedRunLifecycle).not.toHaveBeenCalled();
+    expect(mockedDeleteAgentViaStudio).not.toHaveBeenCalled();
+    expect(ctx.enqueueConfigMutation).not.toHaveBeenCalled();
   });
 
   it("delete_cancelled_by_confirmation_does_not_run_delete_side_effect", async () => {

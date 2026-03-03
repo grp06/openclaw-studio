@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { POST, PUT } from "@/app/api/gateway/agent-state/route";
+import { POST, PUT } from "@/app/api/runtime/agent-state/route";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -56,7 +56,7 @@ describe("agent state route", () => {
 
   it("rejects missing agentId", async () => {
     const response = await POST(
-      new Request("http://localhost/api/gateway/agent-state", {
+      new Request("http://localhost/api/runtime/agent-state", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({}),
@@ -67,7 +67,7 @@ describe("agent state route", () => {
 
   it("rejects unsafe agentId", async () => {
     const response = await POST(
-      new Request("http://localhost/api/gateway/agent-state", {
+      new Request("http://localhost/api/runtime/agent-state", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ agentId: "../nope" }),
@@ -87,7 +87,7 @@ describe("agent state route", () => {
     } as never);
 
     const response = await POST(
-      new Request("http://localhost/api/gateway/agent-state", {
+      new Request("http://localhost/api/runtime/agent-state", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ agentId: "my-agent" }),
@@ -130,7 +130,7 @@ describe("agent state route", () => {
     } as never);
 
     const response = await PUT(
-      new Request("http://localhost/api/gateway/agent-state", {
+      new Request("http://localhost/api/runtime/agent-state", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ agentId: "my-agent", trashDir: "/tmp/trash" }),
@@ -167,7 +167,7 @@ describe("agent state route", () => {
     } as never);
 
     const response = await POST(
-      new Request("http://localhost/api/gateway/agent-state", {
+      new Request("http://localhost/api/runtime/agent-state", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ agentId: "my-agent" }),

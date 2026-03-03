@@ -18,24 +18,33 @@ const MAX_RECONNECT_DELAY_MS = 15_000;
 const CONNECT_PROTOCOL = 3;
 const CONNECT_CLIENT_ID = "openclaw-control-ui";
 const CONNECT_CLIENT_MODE = "webchat";
+const CONNECT_CAPABILITIES = ["tool-events"];
 
 const DEFAULT_METHOD_ALLOWLIST = new Set<string>([
   "status",
   "chat.send",
   "chat.abort",
+  "chat.history",
   "agents.create",
   "agents.update",
   "agents.delete",
   "agents.list",
+  "agents.files.get",
+  "agents.files.set",
   "sessions.list",
   "sessions.preview",
   "sessions.patch",
   "sessions.reset",
   "cron.list",
+  "cron.run",
   "cron.remove",
   "cron.add",
   "config.get",
   "config.set",
+  "models.list",
+  "skills.status",
+  "skills.install",
+  "skills.update",
   "exec.approval.resolve",
   "exec.approvals.get",
   "exec.approvals.set",
@@ -330,7 +339,7 @@ export class OpenClawGatewayAdapter {
               "operator.approvals",
               "operator.pairing",
             ],
-            caps: [],
+            caps: CONNECT_CAPABILITIES,
             auth: { token },
           },
         })

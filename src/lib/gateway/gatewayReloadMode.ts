@@ -10,6 +10,20 @@ type GatewayConfigSnapshot = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object" && !Array.isArray(value));
 
+const callGateway = async <T>(
+  client: GatewayClient,
+  method: string,
+  params: unknown
+): Promise<T> => {
+  const invoke = (
+    client as unknown as { call?: (nextMethod: string, nextParams: unknown) => Promise<unknown> }
+  ).call;
+  if (typeof invoke !== "function") {
+    throw new Error("Legacy gateway client call transport is unavailable.");
+  }
+  return (await invoke(method, params)) as T;
+};
+
 const shouldRetryConfigWrite = (err: unknown) => {
   if (!(err instanceof GatewayResponseError)) return false;
   return /re-run config\.get|config changed since last load/i.test(err.message);
@@ -37,7 +51,7 @@ export async function shouldAwaitDisconnectRestartForRemoteMutation(params: {
     return shouldAwaitDisconnectRestartForReloadMode(cachedMode);
   }
   try {
-    const snapshot = await params.client.call<GatewayConfigSnapshot>("config.get", {});
+    const snapshot = await callGateway<GatewayConfigSnapshot>(params.client, "config.get", {});
     const mode = resolveReloadModeFromConfig(snapshot.config);
     return shouldAwaitDisconnectRestartForReloadMode(mode);
   } catch (err) {
@@ -58,7 +72,7 @@ export async function ensureGatewayReloadModeHotForLocalStudio(params: {
   }
 
   const attemptWrite = async (attempt: number): Promise<void> => {
-    const snapshot = await params.client.call<GatewayConfigSnapshot>("config.get", {});
+    const snapshot = await callGateway<GatewayConfigSnapshot>(params.client, "config.get", {});
     const exists = snapshot.exists !== false;
     const baseHash = exists ? snapshot.hash?.trim() : undefined;
     if (exists && !baseHash) {
@@ -93,7 +107,7 @@ export async function ensureGatewayReloadModeHotForLocalStudio(params: {
     }
 
     try {
-      await params.client.call("config.set", payload);
+      await callGateway(params.client, "config.set", payload);
     } catch (err) {
       if (attempt < 1 && shouldRetryConfigWrite(err)) {
         await attemptWrite(attempt + 1);

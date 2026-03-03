@@ -1,7 +1,8 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
-import Database from "better-sqlite3";
+import type BetterSqlite3 from "better-sqlite3";
 
 import type {
   ControlPlaneDomainEvent,
@@ -10,6 +11,8 @@ import type {
 } from "@/lib/controlplane/contracts";
 import { deriveControlPlaneEventKey } from "@/lib/controlplane/outbox";
 import { resolveStateDir } from "@/lib/clawdbot/paths";
+
+const require = createRequire(import.meta.url);
 
 const RUNTIME_DB_DIRNAME = "openclaw-studio";
 const RUNTIME_DB_FILENAME = "runtime.db";
@@ -40,6 +43,14 @@ type ProjectionRow = {
 type OutboxColumnInfo = {
   name: string;
 };
+
+type BetterSqlite3Factory = typeof BetterSqlite3;
+type BetterSqlite3Database = BetterSqlite3.Database;
+type BetterSqlite3Statement<BindParams extends unknown[] = unknown[], Result = unknown> =
+  BetterSqlite3.Statement<BindParams, Result>;
+
+const loadBetterSqlite3 = (): BetterSqlite3Factory =>
+  require("better-sqlite3") as BetterSqlite3Factory;
 
 const parseDomainEvent = (raw: string): ControlPlaneDomainEvent => {
   return JSON.parse(raw) as ControlPlaneDomainEvent;
@@ -92,23 +103,26 @@ export type BackfillAgentOutboxResult = {
 };
 
 export class SQLiteControlPlaneProjectionStore {
-  private readonly db: Database.Database;
-  private readonly readProjectionStmt: Database.Statement<[], ProjectionRow | undefined>;
-  private readonly readOutboxHeadStmt: Database.Statement<[], { head: number }>;
-  private readonly readOutboxAfterStmt: Database.Statement<[number, number], OutboxRow>;
-  private readonly readOutboxBeforeStmt: Database.Statement<[number, number], OutboxRow>;
-  private readonly readAgentOutboxBeforeStmt: Database.Statement<[string, number, number], OutboxRow>;
-  private readonly readOutboxByIdStmt: Database.Statement<[number], OutboxRow | undefined>;
-  private readonly readBackfillCandidatesStmt: Database.Statement<[number, number], LegacyBackfillRow>;
-  private readonly readProcessedStmt: Database.Statement<[string], { outbox_id: number | null } | undefined>;
-  private readonly insertProcessedStmt: Database.Statement<[string, string]>;
-  private readonly insertOutboxStmt: Database.Statement<[string, string, string, string]>;
-  private readonly updateProcessedOutboxStmt: Database.Statement<[number, string]>;
-  private readonly updateOutboxAgentIdIfNullStmt: Database.Statement<[string, number]>;
-  private readonly upsertStatusProjectionStmt: Database.Statement<
+  private readonly db: BetterSqlite3Database;
+  private readonly readProjectionStmt: BetterSqlite3Statement<[], ProjectionRow | undefined>;
+  private readonly readOutboxHeadStmt: BetterSqlite3Statement<[], { head: number }>;
+  private readonly readOutboxAfterStmt: BetterSqlite3Statement<[number, number], OutboxRow>;
+  private readonly readOutboxBeforeStmt: BetterSqlite3Statement<[number, number], OutboxRow>;
+  private readonly readAgentOutboxBeforeStmt: BetterSqlite3Statement<[string, number, number], OutboxRow>;
+  private readonly readOutboxByIdStmt: BetterSqlite3Statement<[number], OutboxRow | undefined>;
+  private readonly readBackfillCandidatesStmt: BetterSqlite3Statement<[number, number], LegacyBackfillRow>;
+  private readonly readProcessedStmt: BetterSqlite3Statement<
+    [string],
+    { outbox_id: number | null } | undefined
+  >;
+  private readonly insertProcessedStmt: BetterSqlite3Statement<[string, string]>;
+  private readonly insertOutboxStmt: BetterSqlite3Statement<[string, string, string, string]>;
+  private readonly updateProcessedOutboxStmt: BetterSqlite3Statement<[number, string]>;
+  private readonly updateOutboxAgentIdIfNullStmt: BetterSqlite3Statement<[string, number]>;
+  private readonly upsertStatusProjectionStmt: BetterSqlite3Statement<
     [string, string | null, string, string]
   >;
-  private readonly upsertGatewayProjectionStmt: Database.Statement<[string, string]>;
+  private readonly upsertGatewayProjectionStmt: BetterSqlite3Statement<[string, string]>;
   private readonly applyEventTx: (
     event: ControlPlaneDomainEvent,
     eventKey: string
@@ -120,7 +134,8 @@ export class SQLiteControlPlaneProjectionStore {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    this.db = new Database(dbPath);
+    const BetterSqlite3 = loadBetterSqlite3();
+    this.db = new BetterSqlite3(dbPath);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
     this.migrate();

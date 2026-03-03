@@ -10,7 +10,7 @@ import {
 import { sendChatMessageViaStudio } from "@/features/agents/operations/chatSendOperation";
 import { mergePendingLivePatch } from "@/features/agents/state/livePatchQueue";
 import { buildNewSessionAgentPatch, type AgentState } from "@/features/agents/state/store";
-import type { GatewayStatus } from "@/lib/gateway/GatewayClient";
+import type { GatewayStatus } from "@/lib/gateway/gateway-status";
 import type { RuntimeWriteTransport } from "@/features/agents/operations/runtimeWriteTransport";
 
 type ChatInteractionDispatchAction =
@@ -48,7 +48,7 @@ type ChatInteractionController = {
   handleSend: (agentId: string, sessionKey: string, message: string) => Promise<void>;
   removeQueuedMessage: (agentId: string, index: number) => void;
   handleNewSession: (agentId: string) => Promise<void>;
-  handleStopRun: (agentId: string, sessionKey: string) => Promise<void>;
+  handleStopRun: (agentId: string, sessionKey: string, runId?: string | null) => Promise<void>;
   queueLivePatch: (agentId: string, patch: Partial<AgentState>) => void;
   clearPendingLivePatch: (agentId: string) => void;
 };
@@ -295,7 +295,7 @@ export function useChatInteractionController(
   }, [params.agents, params.status, sendNextQueuedMessage]);
 
   const handleStopRun = useCallback(
-    async (agentId: string, sessionKey: string) => {
+    async (agentId: string, sessionKey: string, runId?: string | null) => {
       const stopIntent = planStopRunIntent({
         status: params.status,
         agentId,
@@ -313,8 +313,10 @@ export function useChatInteractionController(
       setStopBusyAgentId(agentId);
       stopBusyAgentIdRef.current = agentId;
       try {
+        const normalizedRunId = typeof runId === "string" ? runId.trim() : "";
         await params.runtimeWriteTransport.chatAbort({
           sessionKey: stopIntent.sessionKey,
+          ...(normalizedRunId ? { runId: normalizedRunId } : {}),
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to stop run.";

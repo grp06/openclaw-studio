@@ -42,7 +42,7 @@ describe("studio settings route", () => {
     expect(body.settings?.version).toBe(1);
   });
 
-  it("GET reports domain mode from server env with STUDIO override precedence", async () => {
+  it("GET always reports domain mode enabled", async () => {
     tempDir = makeTempDir("studio-settings-domain-mode");
     process.env.OPENCLAW_STATE_DIR = tempDir;
     process.env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE = "true";
@@ -51,7 +51,7 @@ describe("studio settings route", () => {
     const response = await GET();
     const body = (await response.json()) as { domainApiModeEnabled?: unknown };
     expect(response.status).toBe(200);
-    expect(body.domainApiModeEnabled).toBe(false);
+    expect(body.domainApiModeEnabled).toBe(true);
   });
 
   it("GET returns local gateway defaults from openclaw.json", async () => {

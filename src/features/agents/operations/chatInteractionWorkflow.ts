@@ -1,4 +1,4 @@
-import type { GatewayStatus } from "@/lib/gateway/GatewayClient";
+import type { GatewayStatus } from "@/lib/gateway/gateway-status";
 
 type StopRunIntent =
   | { kind: "deny"; reason: "not-connected" | "missing-session-key"; message: string }

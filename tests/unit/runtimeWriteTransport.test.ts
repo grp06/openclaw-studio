@@ -161,6 +161,37 @@ describe("runtimeWriteTransport", () => {
     expect(mockedPostStudioIntent).not.toHaveBeenCalled();
   });
 
+  it("propagates runId on chat-abort when provided", async () => {
+    const domainCall = vi.fn(async () => ({}));
+    const domainTransport = createRuntimeWriteTransport({
+      client: { call: domainCall } as never,
+      useDomainIntents: true,
+    });
+
+    await domainTransport.chatAbort({ sessionKey: " agent:3 ", runId: " run-3 " });
+
+    expect(mockedPostStudioIntent).toHaveBeenCalledWith("/api/intents/chat-abort", {
+      sessionKey: "agent:3",
+      runId: "run-3",
+    });
+    expect(domainCall).not.toHaveBeenCalled();
+
+    mockedPostStudioIntent.mockReset();
+    const gatewayCall = vi.fn(async () => ({}));
+    const gatewayTransport = createRuntimeWriteTransport({
+      client: { call: gatewayCall } as never,
+      useDomainIntents: false,
+    });
+
+    await gatewayTransport.chatAbort({ sessionKey: " agent:4 ", runId: " run-4 " });
+
+    expect(gatewayCall).toHaveBeenCalledWith("chat.abort", {
+      sessionKey: "agent:4",
+      runId: "run-4",
+    });
+    expect(mockedPostStudioIntent).not.toHaveBeenCalled();
+  });
+
   it("routes rename and delete by mode", async () => {
     const call = vi.fn(async () => ({}));
     const gatewayTransport = createRuntimeWriteTransport({

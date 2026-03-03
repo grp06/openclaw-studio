@@ -1,13 +1,47 @@
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import { createRequire } from "node:module";
+import path from "node:path";
 
 const require = createRequire(import.meta.url);
 
 const mode = process.argv.includes("--repair") ? "repair" : "check";
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmExecPath = process.env.npm_execpath || "";
+const bundledNpmCliPath = path.resolve(
+  path.dirname(process.execPath),
+  "..",
+  "lib",
+  "node_modules",
+  "npm",
+  "bin",
+  "npm-cli.js"
+);
 
 const log = (message) => {
   console.info(`[native-runtime] ${message}`);
+};
+
+const resolvePathEnvKey = () => {
+  for (const key of Object.keys(process.env)) {
+    if (key.toLowerCase() === "path") return key;
+  }
+  return "PATH";
+};
+
+const resolveSpawnEnv = () => {
+  const pathKey = resolvePathEnvKey();
+  const pathDelimiter = process.platform === "win32" ? ";" : ":";
+  const nodeBinDir = path.dirname(process.execPath);
+  const existingPath = process.env[pathKey] || "";
+  const prefixedPath = existingPath
+    ? `${nodeBinDir}${pathDelimiter}${existingPath}`
+    : nodeBinDir;
+  return {
+    ...process.env,
+    [pathKey]: prefixedPath,
+    npm_config_scripts_prepend_node_path: "true",
+  };
 };
 
 const getErrorCode = (error) => {
@@ -47,7 +81,10 @@ const printRemediation = () => {
 
 const verifyLoad = () => {
   try {
-    require("better-sqlite3");
+    const BetterSqlite3 = require("better-sqlite3");
+    const db = new BetterSqlite3(":memory:");
+    db.prepare("SELECT 1").get();
+    db.close();
     return { ok: true };
   } catch (error) {
     return {
@@ -59,15 +96,40 @@ const verifyLoad = () => {
 };
 
 const rebuildBetterSqlite = () => {
-  const result = spawnSync(npmCommand, ["rebuild", "better-sqlite3"], {
+  const spawnEnv = resolveSpawnEnv();
+  if (fs.existsSync(bundledNpmCliPath)) {
+    const viaBundledNpm = spawnSync(
+      process.execPath,
+      [bundledNpmCliPath, "rebuild", "better-sqlite3"],
+      {
+        stdio: "inherit",
+        env: spawnEnv,
+      }
+    );
+    if (viaBundledNpm.status === 0) return true;
+  }
+
+  if (npmExecPath.trim()) {
+    const viaExecPath = spawnSync(
+      process.execPath,
+      [npmExecPath, "rebuild", "better-sqlite3"],
+      {
+        stdio: "inherit",
+        env: spawnEnv,
+      }
+    );
+    if (viaExecPath.status === 0) return true;
+  }
+  const viaPath = spawnSync(npmCommand, ["rebuild", "better-sqlite3"], {
     stdio: "inherit",
-    env: process.env,
+    env: spawnEnv,
   });
-  return result.status === 0;
+  return viaPath.status === 0;
 };
 
 log(`mode=${mode}`);
 log(`node=${process.version} abi=${process.versions.modules}`);
+log(`node_exec=${process.execPath}`);
 
 const firstPass = verifyLoad();
 if (firstPass.ok) {

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { POST } from "@/app/api/gateway/skills/remove/route";
+import { POST } from "@/app/api/intents/skills-remove/route";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -54,7 +54,7 @@ describe("skills remove route", () => {
 
   it("rejects invalid payload", async () => {
     const response = await POST(
-      new Request("http://localhost/api/gateway/skills/remove", {
+      new Request("http://localhost/api/intents/skills-remove", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({}),
@@ -79,7 +79,7 @@ describe("skills remove route", () => {
     } as never);
 
     const response = await POST(
-      new Request("http://localhost/api/gateway/skills/remove", {
+      new Request("http://localhost/api/intents/skills-remove", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -121,7 +121,7 @@ describe("skills remove route", () => {
     fs.writeFileSync(path.join(skillDir, "SKILL.md"), "# skill", "utf8");
 
     const response = await POST(
-      new Request("http://localhost/api/gateway/skills/remove", {
+      new Request("http://localhost/api/intents/skills-remove", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

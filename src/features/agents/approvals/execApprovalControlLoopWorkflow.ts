@@ -15,7 +15,7 @@ import {
   type CronTranscriptIntent,
 } from "@/features/agents/state/gatewayEventIngressWorkflow";
 import type { AgentState } from "@/features/agents/state/store";
-import type { EventFrame } from "@/lib/gateway/GatewayClient";
+import type { EventFrame } from "@/lib/gateway/gateway-frames";
 
 export type ExecApprovalPendingSnapshot = ApprovalPendingState;
 

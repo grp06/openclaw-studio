@@ -34,10 +34,14 @@ type CronBusyState = {
 type CronCreateDeps = {
   buildInput?: (agentId: string, draft: CronCreateDraft) => CronJobCreateInput;
   createCronJob?: (client: GatewayClient, input: CronJobCreateInput) => Promise<unknown>;
+  createCronJobForInput?: (input: CronJobCreateInput) => Promise<unknown>;
   listCronJobs?: (
     client: GatewayClient,
     params: { includeDisabled?: boolean }
   ) => Promise<{ jobs: CronJobSummary[] }>;
+  listCronJobsWithoutClient?: (params: {
+    includeDisabled?: boolean;
+  }) => Promise<{ jobs: CronJobSummary[] }>;
 };
 
 const isCronActionBusy = (busy: CronBusyState) =>
@@ -70,14 +74,22 @@ export const performCronCreateFlow = async (params: {
   const buildInput = params.deps?.buildInput ?? buildCronJobCreateInput;
   const createCronJob = params.deps?.createCronJob ?? createCronJobDefault;
   const listCronJobs = params.deps?.listCronJobs ?? listCronJobsDefault;
+  const createCronJobForInput = params.deps?.createCronJobForInput ?? null;
+  const listCronJobsWithoutClient = params.deps?.listCronJobsWithoutClient ?? null;
 
   params.onBusyChange(true);
   params.onError(null);
 
   try {
     const input = buildInput(resolvedAgentId, params.draft);
-    await createCronJob(params.client, input);
-    const listResult = await listCronJobs(params.client, { includeDisabled: true });
+    if (createCronJobForInput) {
+      await createCronJobForInput(input);
+    } else {
+      await createCronJob(params.client, input);
+    }
+    const listResult = listCronJobsWithoutClient
+      ? await listCronJobsWithoutClient({ includeDisabled: true })
+      : await listCronJobs(params.client, { includeDisabled: true });
     const jobs = sortCronJobsByUpdatedAt(filterCronJobsForAgent(listResult.jobs, resolvedAgentId));
     params.onJobs(jobs);
     return "created";

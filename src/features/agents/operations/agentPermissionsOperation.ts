@@ -1,5 +1,5 @@
 import type { GatewayClient } from "@/lib/gateway/GatewayClient";
-import { syncGatewaySessionSettings } from "@/lib/gateway/GatewayClient";
+import { syncGatewaySessionSettings } from "@/lib/gateway/session-settings-sync";
 import { readConfigAgentList, updateGatewayAgentOverrides } from "@/lib/gateway/agentConfig";
 import {
   createRuntimeWriteTransport,
@@ -7,7 +7,7 @@ import {
 } from "@/features/agents/operations/runtimeWriteTransport";
 
 type ExecutionRoleId = "conservative" | "collaborative" | "autonomous";
-export type CommandModeId = "off" | "ask" | "auto";
+type CommandModeId = "off" | "ask" | "auto";
 
 export type AgentPermissionsDraft = {
   commandMode: CommandModeId;

@@ -13,5 +13,6 @@ export async function POST(request: Request) {
   if (!sessionKey) {
     return NextResponse.json({ error: "sessionKey is required." }, { status: 400 });
   }
-  return await executeGatewayIntent("chat.abort", { sessionKey });
+  const runId = typeof bodyOrError.runId === "string" ? bodyOrError.runId.trim() : "";
+  return await executeGatewayIntent("chat.abort", runId ? { sessionKey, runId } : { sessionKey });
 }

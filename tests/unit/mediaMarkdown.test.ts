@@ -7,7 +7,7 @@ describe("media-markdown", () => {
     const input = "Hello\nMEDIA: /home/ubuntu/.openclaw/workspace-agent/foo.png\nDone";
     const out = rewriteMediaLinesToMarkdown(input);
 
-    expect(out).toContain("![](/api/gateway/media?path=");
+    expect(out).toContain("![](/api/runtime/media?path=");
     expect(out).toContain("MEDIA: /home/ubuntu/.openclaw/workspace-agent/foo.png");
     expect(out).toContain("Hello");
     expect(out).toContain("Done");
@@ -17,7 +17,7 @@ describe("media-markdown", () => {
     const input = "Hello\nMEDIA:\n/home/ubuntu/.openclaw/workspace-agent/foo.png\nDone";
     const out = rewriteMediaLinesToMarkdown(input);
 
-    expect(out).toContain("![](/api/gateway/media?path=");
+    expect(out).toContain("![](/api/runtime/media?path=");
     expect(out).toContain("MEDIA: /home/ubuntu/.openclaw/workspace-agent/foo.png");
     expect(out).toContain("Hello");
     expect(out).toContain("Done");

@@ -1,12 +1,5 @@
 import "@testing-library/jest-dom/vitest";
 
-if (!process.env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE) {
-  process.env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE = "false";
-}
-if (!process.env.STUDIO_DOMAIN_API_MODE) {
-  process.env.STUDIO_DOMAIN_API_MODE = "false";
-}
-
 const ensureLocalStorage = () => {
   if (typeof window === "undefined") return;
   const existing = window.localStorage as unknown as Record<string, unknown> | undefined;

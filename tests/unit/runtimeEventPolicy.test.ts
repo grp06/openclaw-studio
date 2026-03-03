@@ -176,6 +176,56 @@ describe("runtime event policy", () => {
     expect(intents).toEqual([{ kind: "ignore", reason: "stale-terminal-event" }]);
   });
 
+  it("returns_idle_terminal_intents_for_aborted_mismatched_run_when_agent_is_running", () => {
+    const intents = decideRuntimeChatEvent({
+      agentId: "agent-1",
+      state: "aborted",
+      runId: "run-old",
+      role: "assistant",
+      activeRunId: "run-active",
+      agentStatus: "running",
+      now: 2000,
+      agentRunStartedAt: 900,
+      nextThinking: null,
+      nextText: null,
+      hasThinkingStarted: true,
+      isClosedRun: false,
+      isStaleTerminal: false,
+      shouldRequestHistoryRefresh: false,
+      shouldUpdateLastResult: false,
+      shouldSetRunIdle: true,
+      shouldSetRunError: false,
+      lastResultText: null,
+      assistantCompletionAt: null,
+      shouldQueueLatestUpdate: false,
+      latestUpdateMessage: null,
+    });
+
+    expect(findIntent(intents, "clearPendingLivePatch")).toEqual({
+      kind: "clearPendingLivePatch",
+      agentId: "agent-1",
+    });
+    expect(findIntent(intents, "clearRunTracking")).toEqual({
+      kind: "clearRunTracking",
+      runId: "run-old",
+    });
+    expect(findIntent(intents, "markRunClosed")).toEqual({
+      kind: "markRunClosed",
+      runId: "run-old",
+    });
+    expect(intents).toContainEqual({
+      kind: "dispatchUpdateAgent",
+      agentId: "agent-1",
+      patch: {
+        streamText: null,
+        thinkingTrace: null,
+        runStartedAt: null,
+        status: "idle",
+        runId: null,
+      },
+    });
+  });
+
   it("returns_agent_preflight_intents_for_closed_or_stale_runs", () => {
     const closed = decideRuntimeAgentEvent({
       runId: "run-1",

@@ -1,6 +1,6 @@
 import { postStudioIntent } from "@/lib/controlplane/intents-client";
 import type { GatewayClient } from "@/lib/gateway/GatewayClient";
-import { syncGatewaySessionSettings } from "@/lib/gateway/GatewayClient";
+import { syncGatewaySessionSettings } from "@/lib/gateway/session-settings-sync";
 import { createGatewayAgent, deleteGatewayAgent, renameGatewayAgent } from "@/lib/gateway/agentConfig";
 import {
   readGatewayAgentExecApprovals,
@@ -26,7 +26,7 @@ export type RuntimeWriteTransport = {
     execAsk?: "off" | "on-miss" | "always" | null;
   }) => Promise<unknown>;
   agentCreate: (params: { name: string }) => Promise<{ id: string; name: string }>;
-  chatAbort: (params: { sessionKey: string }) => Promise<void>;
+  chatAbort: (params: { sessionKey: string; runId?: string }) => Promise<void>;
   sessionsReset: (params: { key: string }) => Promise<void>;
   agentRename: (params: { agentId: string; name: string }) => Promise<void>;
   agentDelete: (params: { agentId: string }) => Promise<void>;
@@ -51,6 +51,20 @@ const requireNonEmpty = (value: string, fieldLabel: string): string => {
     throw new Error(`${fieldLabel} is required.`);
   }
   return trimmed;
+};
+
+const callLegacyGateway = async <T>(
+  client: GatewayClient,
+  method: string,
+  params: unknown
+): Promise<T> => {
+  const invoke = (
+    client as unknown as { call?: (nextMethod: string, nextParams: unknown) => Promise<unknown> }
+  ).call;
+  if (typeof invoke !== "function") {
+    throw new Error("Legacy gateway client call transport is unavailable.");
+  }
+  return (await invoke(method, params)) as T;
 };
 
 const unwrapIntentPayload = <T>(result: unknown): T => {
@@ -98,7 +112,7 @@ export function createRuntimeWriteTransport(params: {
         const result = await postIntent("/api/intents/chat-send", payload);
         return unwrapIntentPayload<unknown>(result);
       }
-      return await params.client.call("chat.send", payload);
+      return await callLegacyGateway(params.client, "chat.send", payload);
     },
     sessionSettingsSync: async ({
       sessionKey,
@@ -170,13 +184,17 @@ export function createRuntimeWriteTransport(params: {
           : normalizedName;
       return { id: created.id, name: createdName };
     },
-    chatAbort: async ({ sessionKey }) => {
+    chatAbort: async ({ sessionKey, runId }) => {
       const normalizedSessionKey = requireNonEmpty(sessionKey, "Session key");
+      const normalizedRunId = typeof runId === "string" ? runId.trim() : "";
+      const payload = normalizedRunId
+        ? { sessionKey: normalizedSessionKey, runId: normalizedRunId }
+        : { sessionKey: normalizedSessionKey };
       if (params.useDomainIntents) {
-        await postIntent("/api/intents/chat-abort", { sessionKey: normalizedSessionKey });
+        await postIntent("/api/intents/chat-abort", payload);
         return;
       }
-      await params.client.call("chat.abort", { sessionKey: normalizedSessionKey });
+      await callLegacyGateway(params.client, "chat.abort", payload);
     },
     sessionsReset: async ({ key }) => {
       const normalizedSessionKey = requireNonEmpty(key, "Session key");
@@ -184,7 +202,7 @@ export function createRuntimeWriteTransport(params: {
         await postIntent("/api/intents/sessions-reset", { key: normalizedSessionKey });
         return;
       }
-      await params.client.call("sessions.reset", { key: normalizedSessionKey });
+      await callLegacyGateway(params.client, "sessions.reset", { key: normalizedSessionKey });
     },
     agentRename: async ({ agentId, name }) => {
       const normalizedAgentId = requireNonEmpty(agentId, "Agent id");
@@ -216,7 +234,10 @@ export function createRuntimeWriteTransport(params: {
         await postIntent("/api/intents/exec-approval-resolve", { id: normalizedId, decision });
         return;
       }
-      await params.client.call("exec.approval.resolve", { id: normalizedId, decision });
+      await callLegacyGateway(params.client, "exec.approval.resolve", {
+        id: normalizedId,
+        decision,
+      });
     },
     execApprovalsSet: async ({ agentId, role }) => {
       const normalizedAgentId = requireNonEmpty(agentId, "Agent id");
@@ -264,7 +285,7 @@ export function createRuntimeWriteTransport(params: {
         });
         return;
       }
-      await params.client.call("agent.wait", {
+      await callLegacyGateway(params.client, "agent.wait", {
         runId: normalizedRunId,
         ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
       });

@@ -17,9 +17,9 @@ import {
 import type { AgentState } from "@/features/agents/state/store";
 import type { CronCreateDraft, CronCreateTemplateId } from "@/lib/cron/createPayloadBuilder";
 import { formatCronPayload, formatCronSchedule, type CronJobSummary } from "@/lib/cron/types";
-import type { GatewayClient } from "@/lib/gateway/GatewayClient";
+import type { GatewayStatus } from "@/lib/gateway/gateway-status";
 import type { SkillStatusReport } from "@/lib/skills/types";
-import { readGatewayAgentFile, writeGatewayAgentFile } from "@/lib/gateway/agentFiles";
+import { readDomainAgentFile, writeDomainAgentFile } from "@/lib/controlplane/domain-runtime-client";
 import {
   resolveExecutionRoleFromAgent,
   resolvePresetDefaultsForRole,
@@ -1201,10 +1201,10 @@ type UseAgentFilesEditorResult = {
 };
 
 const useAgentFilesEditor = (params: {
-  client: GatewayClient | null | undefined;
   agentId: string | null | undefined;
+  gatewayStatus: GatewayStatus;
 }): UseAgentFilesEditorResult => {
-  const { client, agentId } = params;
+  const { agentId, gatewayStatus } = params;
   const [agentFiles, setAgentFiles] = useState(createAgentFilesState);
   const [agentFilesLoading, setAgentFilesLoading] = useState(false);
   const [agentFilesSaving, setAgentFilesSaving] = useState(false);
@@ -1233,13 +1233,17 @@ const useAgentFilesEditor = (params: {
         setAgentFilesError("Agent ID is missing for this agent.");
         return;
       }
-      if (!client) {
-        setAgentFilesError("Gateway client is not available.");
+      if (gatewayStatus !== "connected") {
+        if (gatewayStatus === "connecting") {
+          setAgentFilesError(null);
+        } else {
+          setAgentFilesError("Gateway is not connected.");
+        }
         return;
       }
       const results = await Promise.all(
         AGENT_FILE_NAMES.map(async (name) => {
-          const file = await readGatewayAgentFile({ client, agentId: trimmedAgentId, name });
+          const file = await readDomainAgentFile({ agentId: trimmedAgentId, name });
           return { name, content: file.content, exists: file.exists };
         })
       );
@@ -1260,7 +1264,7 @@ const useAgentFilesEditor = (params: {
     } finally {
       setAgentFilesLoading(false);
     }
-  }, [agentId, client]);
+  }, [agentId, gatewayStatus]);
 
   const saveAgentFiles = useCallback(async () => {
     setAgentFilesSaving(true);
@@ -1271,14 +1275,13 @@ const useAgentFilesEditor = (params: {
         setAgentFilesError("Agent ID is missing for this agent.");
         return false;
       }
-      if (!client) {
-        setAgentFilesError("Gateway client is not available.");
+      if (gatewayStatus !== "connected") {
+        setAgentFilesError("Gateway is not connected.");
         return false;
       }
       await Promise.all(
         AGENT_FILE_NAMES.map(async (name) => {
-          await writeGatewayAgentFile({
-            client,
+          await writeDomainAgentFile({
             agentId: trimmedAgentId,
             name,
             content: agentFiles[name].content,
@@ -1303,7 +1306,7 @@ const useAgentFilesEditor = (params: {
     } finally {
       setAgentFilesSaving(false);
     }
-  }, [agentFiles, agentId, client]);
+  }, [agentFiles, agentId, gatewayStatus]);
 
   const setAgentFileContent = useCallback((name: AgentFileName, value: string) => {
     if (!isAgentFileName(name)) return;
@@ -1337,7 +1340,7 @@ const useAgentFilesEditor = (params: {
 };
 
 type AgentBrainPanelProps = {
-  client: GatewayClient;
+  gatewayStatus: GatewayStatus;
   agents: AgentState[];
   selectedAgentId: string | null;
   onUnsavedChangesChange?: (dirty: boolean) => void;
@@ -1357,7 +1360,7 @@ const AgentBrainPanelSection = ({
 );
 
 export const AgentBrainPanel = ({
-  client,
+  gatewayStatus,
   agents,
   selectedAgentId,
   onUnsavedChangesChange,
@@ -1379,7 +1382,10 @@ export const AgentBrainPanel = ({
     setAgentFileContent,
     saveAgentFiles,
     discardAgentFileChanges,
-  } = useAgentFilesEditor({ client, agentId: selectedAgent?.agentId ?? null });
+  } = useAgentFilesEditor({
+    agentId: selectedAgent?.agentId ?? null,
+    gatewayStatus,
+  });
   const draft = useMemo(() => parsePersonalityFiles(agentFiles), [agentFiles]);
 
   const setIdentityField = useCallback(

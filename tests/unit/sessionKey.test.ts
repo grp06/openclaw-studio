@@ -4,7 +4,7 @@ import {
   buildAgentMainSessionKey,
   isSameSessionKey,
   parseAgentIdFromSessionKey,
-} from "@/lib/gateway/GatewayClient";
+} from "@/lib/gateway/session-keys";
 
 describe("sessionKey helpers", () => {
   it("buildAgentMainSessionKey formats agent session key", () => {

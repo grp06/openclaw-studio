@@ -30,7 +30,7 @@ describe("skills remove client", () => {
       managedSkillsDir: " /tmp/managed ",
     });
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/gateway/skills/remove", {
+    expect(fetchMock).toHaveBeenCalledWith("/api/intents/skills-remove", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({

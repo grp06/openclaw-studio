@@ -22,7 +22,7 @@ vi.mock("node:child_process", async () => {
 
 const mockedSpawnSync = vi.mocked(spawnSync);
 
-let GET: typeof import("@/app/api/gateway/media/route")["GET"];
+let GET: typeof import("@/app/api/runtime/media/route")["GET"];
 
 const makeTempDir = (name: string) => fs.mkdtempSync(path.join(os.tmpdir(), `${name}-`));
 
@@ -45,10 +45,10 @@ const writeStudioSettings = (stateDir: string, gatewayUrl: string) => {
 };
 
 beforeAll(async () => {
-  ({ GET } = await import("@/app/api/gateway/media/route"));
+  ({ GET } = await import("@/app/api/runtime/media/route"));
 });
 
-describe("/api/gateway/media route", () => {
+describe("/api/runtime/media route", () => {
   let tempDir: string | null = null;
 
   beforeEach(() => {
@@ -89,7 +89,7 @@ describe("/api/gateway/media route", () => {
     const remotePath = "/home/ubuntu/.openclaw/images/pic.png";
     const response = await GET(
       new Request(
-        `http://localhost/api/gateway/media?path=${encodeURIComponent(remotePath)}`
+        `http://localhost/api/runtime/media?path=${encodeURIComponent(remotePath)}`
       )
     );
 
@@ -124,4 +124,3 @@ describe("/api/gateway/media route", () => {
     expect(options.maxBuffer).toBeGreaterThan(payloadBytes.length);
   });
 });
-

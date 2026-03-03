@@ -1,6 +1,6 @@
-export type RuntimeTerminalCommitSource = "chat-final" | "lifecycle-fallback";
+type RuntimeTerminalCommitSource = "chat-final" | "lifecycle-fallback";
 
-export type RuntimeTerminalRunState = {
+type RuntimeTerminalRunState = {
   chatFinalSeen: boolean;
   terminalCommitted: boolean;
   lastTerminalSeq: number | null;

@@ -87,7 +87,7 @@ export type SummarySnapshotAgent = {
   status?: AgentState["status"];
 };
 
-export type SummarySessionStatusEntry = {
+type SummarySessionStatusEntry = {
   key: string;
   updatedAt: number | null;
 };
@@ -105,7 +105,7 @@ type SummaryPreviewItem = {
   timestamp?: number | string;
 };
 
-export type SummaryPreviewEntry = {
+type SummaryPreviewEntry = {
   key: string;
   status: "ok" | "empty" | "missing" | "error";
   items: SummaryPreviewItem[];

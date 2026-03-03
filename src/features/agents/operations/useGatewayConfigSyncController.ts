@@ -13,6 +13,7 @@ import {
   type GatewayModelPolicySnapshot,
 } from "@/lib/gateway/models";
 import type { GatewayClient } from "@/lib/gateway/GatewayClient";
+import { loadDomainConfigSnapshot, loadDomainModels } from "@/lib/controlplane/domain-runtime-client";
 
 const defaultLogError = (message: string, err: unknown) => {
   console.error(message, err);
@@ -21,6 +22,7 @@ const defaultLogError = (message: string, err: unknown) => {
 type UseGatewayConfigSyncControllerParams = {
   client: GatewayClient;
   status: GatewayConnectionStatus;
+  useDomainApiReads: boolean;
   settingsRouteActive: boolean;
   inspectSidebarAgentId: string | null;
   gatewayConfigSnapshot: GatewayModelPolicySnapshot | null;
@@ -48,6 +50,7 @@ export function useGatewayConfigSyncController(
   const {
     client,
     status,
+    useDomainApiReads,
     settingsRouteActive,
     inspectSidebarAgentId,
     gatewayConfigSnapshot,
@@ -65,7 +68,9 @@ export function useGatewayConfigSyncController(
   const refreshGatewayConfigSnapshot = useCallback(async () => {
     if (status !== "connected") return null;
     try {
-      const snapshot = await client.call<GatewayModelPolicySnapshot>("config.get", {});
+      const snapshot = useDomainApiReads
+        ? await loadDomainConfigSnapshot()
+        : await client.call<GatewayModelPolicySnapshot>("config.get", {});
       setGatewayConfigSnapshot(snapshot);
       return snapshot;
     } catch (err) {
@@ -74,9 +79,12 @@ export function useGatewayConfigSyncController(
       }
       return null;
     }
-  }, [client, isDisconnectLikeError, logError, setGatewayConfigSnapshot, status]);
+  }, [client, isDisconnectLikeError, logError, setGatewayConfigSnapshot, status, useDomainApiReads]);
 
   useEffect(() => {
+    if (useDomainApiReads) {
+      return;
+    }
     const repairIntent = resolveSandboxRepairIntent({
       status,
       attempted: sandboxRepairAttemptedRef.current,
@@ -107,7 +115,7 @@ export function useGatewayConfigSyncController(
         await loadAgents();
       },
     });
-  }, [client, enqueueConfigMutation, gatewayConfigSnapshot, loadAgents, status]);
+  }, [client, enqueueConfigMutation, gatewayConfigSnapshot, loadAgents, status, useDomainApiReads]);
 
   useEffect(() => {
     if (
@@ -135,7 +143,9 @@ export function useGatewayConfigSyncController(
     const loadModels = async () => {
       let configSnapshot: GatewayModelPolicySnapshot | null = null;
       try {
-        configSnapshot = await client.call<GatewayModelPolicySnapshot>("config.get", {});
+        configSnapshot = useDomainApiReads
+          ? await loadDomainConfigSnapshot()
+          : await client.call<GatewayModelPolicySnapshot>("config.get", {});
         if (!cancelled) {
           setGatewayConfigSnapshot(configSnapshot);
         }
@@ -146,12 +156,12 @@ export function useGatewayConfigSyncController(
       }
 
       try {
-        const result = await client.call<{ models: GatewayModelChoice[] }>(
-          "models.list",
-          {}
-        );
+        const catalog = useDomainApiReads
+          ? await loadDomainModels()
+          : (
+              await client.call<{ models: GatewayModelChoice[] }>("models.list", {})
+            ).models ?? [];
         if (cancelled) return;
-        const catalog = Array.isArray(result.models) ? result.models : [];
         setGatewayModels(buildGatewayModelChoices(catalog, configSnapshot));
         setGatewayModelsError(null);
       } catch (err) {
@@ -177,6 +187,7 @@ export function useGatewayConfigSyncController(
     setGatewayModels,
     setGatewayModelsError,
     status,
+    useDomainApiReads,
   ]);
 
   return {

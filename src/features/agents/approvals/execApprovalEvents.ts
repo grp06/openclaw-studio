@@ -1,5 +1,5 @@
 import type { AgentState } from "@/features/agents/state/store";
-import type { EventFrame } from "@/lib/gateway/GatewayClient";
+import type { EventFrame } from "@/lib/gateway/gateway-frames";
 import type { ExecApprovalDecision } from "@/features/agents/approvals/types";
 
 type RequestedPayload = {

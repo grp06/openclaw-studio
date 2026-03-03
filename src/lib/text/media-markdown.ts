@@ -14,7 +14,7 @@ const isImagePath = (value: string): boolean => {
 };
 
 const toMediaUrl = (path: string): string => {
-  return `/api/gateway/media?path=${encodeURIComponent(path)}`;
+  return `/api/runtime/media?path=${encodeURIComponent(path)}`;
 };
 
 /**

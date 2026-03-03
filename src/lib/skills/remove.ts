@@ -20,7 +20,7 @@ export const removeSkillFromGateway = async (
     managedSkillsDir: normalizeRequired(request.managedSkillsDir, "managedSkillsDir"),
   };
 
-  const response = await fetchJson<{ result: SkillRemoveResult }>("/api/gateway/skills/remove", {
+  const response = await fetchJson<{ result: SkillRemoveResult }>("/api/intents/skills-remove", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),

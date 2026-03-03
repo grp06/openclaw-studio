@@ -29,6 +29,7 @@ type RenderControllerContext = {
   rerenderWith: (
     overrides: Partial<{
       status: "disconnected" | "connecting" | "connected";
+      useDomainApiReads: boolean;
       settingsRouteActive: boolean;
       inspectSidebarAgentId: string | null;
       logError: (message: string, err: unknown) => void;
@@ -46,6 +47,7 @@ const countMethodCalls = (callMock: ReturnType<typeof vi.fn>, method: string) =>
 
 type RenderControllerParams = {
   status: "disconnected" | "connecting" | "connected";
+  useDomainApiReads: boolean;
   settingsRouteActive: boolean;
   inspectSidebarAgentId: string | null;
   initialGatewayConfigSnapshot?: GatewayModelPolicySnapshot | null;
@@ -83,6 +85,7 @@ const renderController = (
 
   let currentParams: RenderControllerParams = {
     status: "connected" as const,
+    useDomainApiReads: false,
     settingsRouteActive: false,
     inspectSidebarAgentId: null as string | null,
     isDisconnectLikeError: overrides?.isDisconnectLikeError ?? (() => false),
@@ -109,6 +112,7 @@ const renderController = (
     const { refreshGatewayConfigSnapshot } = useGatewayConfigSyncController({
       client: client as unknown as GatewayClient,
       status: params.status,
+      useDomainApiReads: params.useDomainApiReads,
       settingsRouteActive: params.settingsRouteActive,
       inspectSidebarAgentId: params.inspectSidebarAgentId,
       gatewayConfigSnapshot,

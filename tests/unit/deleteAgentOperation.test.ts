@@ -278,7 +278,7 @@ describe("delete agent via studio operation", () => {
 
   it("uses domain cron intents instead of browser cron rpc when domain intents are enabled", async () => {
     const fetchJson: FetchJson = vi.fn(async (input, init) => {
-      if (input === "/api/gateway/agent-state" && init?.method === "POST") {
+      if (input === "/api/runtime/agent-state" && init?.method === "POST") {
         return { result: createTrashResult() } as never;
       }
       if (input === "/api/intents/cron-remove-agent" && init?.method === "POST") {
@@ -338,7 +338,7 @@ describe("delete agent via studio operation", () => {
     const backups = [createCronRestoreInput("Job R", "agent-1")];
     const callOrder: string[] = [];
     const fetchJson: FetchJson = vi.fn(async (input, init) => {
-      if (input === "/api/gateway/agent-state" && init?.method === "POST") {
+      if (input === "/api/runtime/agent-state" && init?.method === "POST") {
         callOrder.push("trash");
         return {
           result: createTrashResult({
@@ -355,7 +355,7 @@ describe("delete agent via studio operation", () => {
         callOrder.push("cron-restore");
         return { ok: true, payload: { restored: backups.length } } as never;
       }
-      if (input === "/api/gateway/agent-state" && init?.method === "PUT") {
+      if (input === "/api/runtime/agent-state" && init?.method === "PUT") {
         callOrder.push("state-restore");
         return { result: { restored: [] } } as never;
       }

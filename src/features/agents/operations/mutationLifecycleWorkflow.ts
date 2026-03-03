@@ -2,9 +2,9 @@ import type { GatewayStatus } from "@/features/agents/operations/gatewayRestartP
 import type { AgentCreateModalSubmitPayload } from "@/features/agents/creation/types";
 import type { ConfigMutationKind } from "@/features/agents/operations/useConfigMutationQueue";
 
-export type MutationKind = "create-agent" | "rename-agent" | "delete-agent";
+type MutationKind = "create-agent" | "rename-agent" | "delete-agent";
 
-export type MutationBlockPhase = "queued" | "mutating" | "awaiting-restart";
+type MutationBlockPhase = "queued" | "mutating" | "awaiting-restart";
 
 export type MutationBlockState = {
   kind: MutationKind;
@@ -189,7 +189,7 @@ export type CreateAgentBlockState = {
   startedAt: number;
 };
 
-export type CreateAgentLifecycleCompletion = {
+type CreateAgentLifecycleCompletion = {
   agentId: string;
   agentName: string;
 };

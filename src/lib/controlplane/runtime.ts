@@ -9,20 +9,6 @@ import {
   type BackfillAgentOutboxResult,
 } from "@/lib/controlplane/projection-store";
 
-const DOMAIN_MODE_FALSE_VALUES = new Set(["0", "false", "no", "off"]);
-
-const readDomainModeRawValue = (env: NodeJS.ProcessEnv = process.env): string => {
-  const serverValue = env.STUDIO_DOMAIN_API_MODE?.trim().toLowerCase() ?? "";
-  if (serverValue) return serverValue;
-  return env.NEXT_PUBLIC_STUDIO_DOMAIN_API_MODE?.trim().toLowerCase() ?? "";
-};
-
-const readDomainApiMode = (env: NodeJS.ProcessEnv = process.env): boolean => {
-  const raw = readDomainModeRawValue(env);
-  if (!raw) return true;
-  return !DOMAIN_MODE_FALSE_VALUES.has(raw);
-};
-
 type ControlPlaneRuntimeOptions = {
   adapterOptions?: OpenClawAdapterOptions;
   dbPath?: string;
@@ -47,6 +33,16 @@ export class ControlPlaneRuntime {
 
   async disconnect(): Promise<void> {
     await this.adapter.stop();
+  }
+
+  connectionStatus() {
+    return this.adapter.getStatus();
+  }
+
+  async reconnectForGatewaySettingsChange(): Promise<void> {
+    if (this.adapter.getStatus() === "stopped") return;
+    await this.adapter.stop();
+    await this.adapter.start();
   }
 
   snapshot(): ControlPlaneRuntimeSnapshot {
@@ -108,10 +104,16 @@ export const getControlPlaneRuntime = (options?: ControlPlaneRuntimeOptions): Co
   return globalState.__openclawStudioControlPlaneRuntime;
 };
 
+export const peekControlPlaneRuntime = (): ControlPlaneRuntime | null => {
+  const globalState = globalThis as GlobalControlPlaneState;
+  return globalState.__openclawStudioControlPlaneRuntime ?? null;
+};
+
 export const resetControlPlaneRuntimeForTests = (): void => {
   const globalState = globalThis as GlobalControlPlaneState;
   delete globalState.__openclawStudioControlPlaneRuntime;
 };
 
-export const isStudioDomainApiModeEnabled = (env: NodeJS.ProcessEnv = process.env): boolean =>
-  readDomainApiMode(env);
+export const isStudioDomainApiModeEnabled = (): boolean => {
+  return true;
+};

@@ -1,5 +1,5 @@
 import type { AgentStatus } from "@/features/agents/state/store";
-import type { GatewayStatus } from "@/lib/gateway/GatewayClient";
+import type { GatewayStatus } from "@/lib/gateway/gateway-status";
 
 export const AGENT_STATUS_LABEL: Record<AgentStatus, string> = {
   idle: "Idle",
