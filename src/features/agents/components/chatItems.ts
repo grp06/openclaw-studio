@@ -43,6 +43,8 @@ type BuildAgentChatItemsInput = {
   toolCallingEnabled: boolean;
 };
 
+export const DEFAULT_SEMANTIC_RENDER_TURN_LIMIT = 50;
+
 const normalizeUserDisplayText = (value: string): string => {
   return value.replace(/\s+/g, " ").trim();
 };
@@ -403,6 +405,36 @@ export const buildAgentChatRenderBlocks = (
 
   flushAssistant();
   return blocks;
+};
+
+const isSemanticTurnItem = (item: AgentChatItem): boolean => {
+  if (item.kind !== "user" && item.kind !== "assistant") return false;
+  return Boolean(item.text.trim());
+};
+
+export const boundChatItemsBySemanticTurns = (params: {
+  items: AgentChatItem[];
+  turnLimit: number;
+}): AgentChatItem[] => {
+  const safeTurnLimit =
+    Number.isFinite(params.turnLimit) && params.turnLimit > 0
+      ? Math.floor(params.turnLimit)
+      : DEFAULT_SEMANTIC_RENDER_TURN_LIMIT;
+  if (params.items.length === 0) return params.items;
+
+  let startIndex = 0;
+  let turnCount = 0;
+  for (let index = params.items.length - 1; index >= 0; index -= 1) {
+    if (!isSemanticTurnItem(params.items[index])) continue;
+    turnCount += 1;
+    if (turnCount > safeTurnLimit) {
+      startIndex = index + 1;
+      break;
+    }
+  }
+
+  if (startIndex <= 0) return params.items;
+  return params.items.slice(startIndex);
 };
 
 const stripTrailingToolCallId = (

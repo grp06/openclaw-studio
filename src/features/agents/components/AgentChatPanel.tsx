@@ -24,8 +24,10 @@ import type {
   PendingExecApproval,
 } from "@/features/agents/approvals/types";
 import {
+  boundChatItemsBySemanticTurns,
   buildAgentChatRenderBlocks,
   buildFinalAgentChatItems,
+  DEFAULT_SEMANTIC_RENDER_TURN_LIMIT,
   summarizeToolLabel,
   type AssistantTraceEvent,
   type AgentChatItem,
@@ -587,7 +589,6 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
   status,
   historyMaybeTruncated,
   historyFetchedCount,
-  historyFetchLimit,
   onLoadMoreHistory,
   chatItems,
   liveThinkingText,
@@ -609,7 +610,6 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
   status: AgentRecord["status"];
   historyMaybeTruncated: boolean;
   historyFetchedCount: number | null;
-  historyFetchLimit: number | null;
   onLoadMoreHistory: () => void;
   chatItems: AgentChatItem[];
   liveThinkingText: string;
@@ -749,8 +749,7 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
           {historyMaybeTruncated && isAtTop ? (
             <div className="-mx-1 flex items-center justify-between gap-3 rounded-md bg-surface-2 px-3 py-2 shadow-2xs">
               <div className="type-meta min-w-0 truncate font-mono text-muted-foreground">
-                Showing most recent {typeof historyFetchedCount === "number" ? historyFetchedCount : "?"} messages
-                {typeof historyFetchLimit === "number" ? ` (limit ${historyFetchLimit})` : ""}
+                Showing latest {typeof historyFetchedCount === "number" ? historyFetchedCount : "?"} turns
               </div>
               <button
                 type="button"
@@ -1227,8 +1226,19 @@ export const AgentChatPanel = ({
       }),
     [agent.outputLines, agent.showThinkingTraces, agent.toolCallingEnabled]
   );
+  const visibleChatItems = useMemo(
+    () =>
+      boundChatItemsBySemanticTurns({
+        items: chatItems,
+        turnLimit: DEFAULT_SEMANTIC_RENDER_TURN_LIMIT,
+      }),
+    [chatItems]
+  );
   const running = agent.status === "running";
-  const renderBlocks = useMemo(() => buildAgentChatRenderBlocks(chatItems), [chatItems]);
+  const renderBlocks = useMemo(
+    () => buildAgentChatRenderBlocks(visibleChatItems),
+    [visibleChatItems]
+  );
   const hasActiveStreamingTailInTranscript =
     running && renderBlocks.length > 0 && !renderBlocks[renderBlocks.length - 1].text;
   const liveAssistantText =
@@ -1511,9 +1521,8 @@ export const AgentChatPanel = ({
           status={agent.status}
           historyMaybeTruncated={agent.historyMaybeTruncated}
           historyFetchedCount={agent.historyFetchedCount}
-          historyFetchLimit={agent.historyFetchLimit}
           onLoadMoreHistory={onLoadMoreHistory}
-          chatItems={chatItems}
+          chatItems={visibleChatItems}
           liveThinkingText={liveThinkingText}
           liveAssistantText={liveAssistantText}
           showTypingIndicator={showTypingIndicator}

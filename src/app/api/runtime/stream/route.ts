@@ -9,12 +9,19 @@ const HEARTBEAT_INTERVAL_MS = 15_000;
 
 const encoder = new TextEncoder();
 
-const parseLastEventId = (request: Request): number => {
-  const headerValue = request.headers.get("last-event-id");
-  if (!headerValue) return 0;
-  const parsed = Number(headerValue.trim());
+const parseRawEventId = (raw: string | null): number | null => {
+  if (!raw) return null;
+  const parsed = Number(raw.trim());
   if (!Number.isFinite(parsed) || parsed < 0) return 0;
   return Math.floor(parsed);
+};
+
+export const parseLastEventIdFromRequest = (request: Request): number => {
+  const url = new URL(request.url);
+  const queryValue = parseRawEventId(url.searchParams.get("lastEventId"));
+  if (queryValue !== null) return queryValue;
+  const headerValue = parseRawEventId(request.headers.get("last-event-id"));
+  return headerValue ?? 0;
 };
 
 const toSseFrame = (entry: ControlPlaneOutboxEntry): Uint8Array => {
@@ -53,7 +60,7 @@ export async function GET(request: Request) {
     );
   }
   const controlPlane = bootstrap.runtime;
-  const lastSeenId = parseLastEventId(request);
+  const lastSeenId = parseLastEventIdFromRequest(request);
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {

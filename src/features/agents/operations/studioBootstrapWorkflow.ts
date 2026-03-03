@@ -89,6 +89,22 @@ type FocusedSelectionPatchIntent =
       debounceMs: number;
     };
 
+type StartupFleetBootstrapIntent =
+  | {
+      kind: "skip";
+      reason:
+        | "not-connected"
+        | "focused-preferences-not-loaded"
+        | "restart-blocked"
+        | "create-blocked"
+        | "already-loaded"
+        | "in-flight";
+    }
+  | {
+      kind: "load";
+      key: string;
+    };
+
 export function planFocusedSelectionPatch(params: {
   gatewayKey: string;
   status: "connected" | "connecting" | "disconnected";
@@ -122,6 +138,43 @@ export function planFocusedSelectionPatch(params: {
     },
     debounceMs: FOCUSED_PATCH_DEBOUNCE_MS,
   };
+}
+
+export function planStartupFleetBootstrapIntent(params: {
+  coreConnected: boolean;
+  focusedPreferencesLoaded: boolean;
+  hasRestartingMutationBlock: boolean;
+  hasCreateAgentBlock: boolean;
+  gatewayUrl: string;
+  useDomainApiMode: boolean;
+  lastCompletedKey: string | null;
+  inFlightKey: string | null;
+}): StartupFleetBootstrapIntent {
+  if (!params.coreConnected) {
+    return { kind: "skip", reason: "not-connected" };
+  }
+  if (!params.focusedPreferencesLoaded) {
+    return { kind: "skip", reason: "focused-preferences-not-loaded" };
+  }
+  if (params.hasRestartingMutationBlock) {
+    return { kind: "skip", reason: "restart-blocked" };
+  }
+  if (params.hasCreateAgentBlock) {
+    return { kind: "skip", reason: "create-blocked" };
+  }
+
+  const normalizedGatewayUrl = params.gatewayUrl.trim();
+  if (!normalizedGatewayUrl) {
+    return { kind: "skip", reason: "not-connected" };
+  }
+  const key = `${params.useDomainApiMode ? "domain" : "gateway"}:${normalizedGatewayUrl}`;
+  if (params.inFlightKey === key) {
+    return { kind: "skip", reason: "in-flight" };
+  }
+  if (params.lastCompletedKey === key) {
+    return { kind: "skip", reason: "already-loaded" };
+  }
+  return { kind: "load", key };
 }
 
 type FocusedPreferenceRestoreIntent = {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  boundChatItemsBySemanticTurns,
   buildAgentChatItems,
   buildAgentChatRenderBlocks,
   buildFinalAgentChatItems,
@@ -334,5 +335,42 @@ describe("buildAgentChatRenderBlocks", () => {
         traceEvents: [{ kind: "thinking", text: "_a_\n\n_b_" }],
       },
     ]);
+  });
+});
+
+describe("boundChatItemsBySemanticTurns", () => {
+  it("keeps recent semantic turns while preserving attached tool/thinking items", () => {
+    const items = boundChatItemsBySemanticTurns({
+      items: [
+        { kind: "user", text: "q1" },
+        { kind: "assistant", text: "a1" },
+        { kind: "user", text: "q2" },
+        { kind: "thinking", text: "_plan_" },
+        { kind: "tool", text: "tool-result" },
+        { kind: "assistant", text: "a2" },
+      ],
+      turnLimit: 2,
+    });
+
+    expect(items).toEqual([
+      { kind: "user", text: "q2" },
+      { kind: "thinking", text: "_plan_" },
+      { kind: "tool", text: "tool-result" },
+      { kind: "assistant", text: "a2" },
+    ]);
+  });
+
+  it("returns full list when semantic turns are within limit", () => {
+    const original = [
+      { kind: "user", text: "q1" } as const,
+      { kind: "assistant", text: "a1" } as const,
+      { kind: "tool", text: "tool-result" } as const,
+    ];
+    const items = boundChatItemsBySemanticTurns({
+      items: original,
+      turnLimit: 10,
+    });
+
+    expect(items).toEqual(original);
   });
 });

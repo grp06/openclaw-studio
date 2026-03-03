@@ -25,6 +25,7 @@ import {
 } from "@/lib/gateway/models";
 import {
   AgentStoreProvider,
+  agentStoreReducer,
   getFilteredAgents,
   getSelectedAgent,
   type FocusFilter,
@@ -87,6 +88,7 @@ import {
   runStudioFocusedPreferenceLoadOperation,
   runStudioFocusedSelectionPersistenceOperation,
 } from "@/features/agents/operations/studioBootstrapOperation";
+import { planStartupFleetBootstrapIntent } from "@/features/agents/operations/studioBootstrapWorkflow";
 import {
   CREATE_AGENT_DEFAULT_PERMISSIONS,
   applyCreateAgentBootstrapPermissions,
@@ -117,6 +119,7 @@ import {
   listDomainCronJobs,
   listDomainSessions,
 } from "@/lib/controlplane/domain-runtime-client";
+import { useRuntimeEventStream } from "@/features/agents/state/useRuntimeEventStream";
 const PENDING_EXEC_APPROVAL_PRUNE_GRACE_MS = 500;
 
 type MobilePane = "fleet" | "chat";
@@ -235,6 +238,11 @@ const AgentStudioPage = () => {
   const gatewayConnected = gatewayStatus === "connected";
   const coreConnected = useDomainApiMode ? true : gatewayConnected;
   const coreStatus: GatewayStatus = useDomainApiMode ? "connected" : gatewayStatus;
+  const runtimeStreamResumeKey = useMemo(() => {
+    const normalizedGatewayUrl = gatewayUrl.trim();
+    if (!normalizedGatewayUrl) return null;
+    return `${useDomainApiMode ? "domain" : "gateway"}:${normalizedGatewayUrl}`;
+  }, [gatewayUrl, useDomainApiMode]);
   const runtimeWriteTransport = useMemo(
     () =>
       createRuntimeWriteTransport({
@@ -252,6 +260,13 @@ const AgentStudioPage = () => {
   const [didAttemptGatewayConnect, setDidAttemptGatewayConnect] = useState(false);
   const [heartbeatTick, setHeartbeatTick] = useState(0);
   const stateRef = useRef(state);
+  const dispatchAgentStoreAction = useCallback(
+    (action: Parameters<typeof agentStoreReducer>[1]) => {
+      stateRef.current = agentStoreReducer(stateRef.current, action);
+      dispatch(action);
+    },
+    [dispatch]
+  );
   const focusFilterTouchedRef = useRef(false);
   const [gatewayModels, setGatewayModels] = useState<GatewayModelChoice[]>([]);
   const [gatewayModelsError, setGatewayModelsError] = useState<string | null>(null);
@@ -291,6 +306,9 @@ const AgentStudioPage = () => {
   const approvalPausedRunIdByAgentRef = useRef<Map<string, string>>(new Map());
   const domainEventIngressRef = useRef<(event: EventFrame) => void>(() => {});
   const pendingDomainOutboxEntriesRef = useRef<ControlPlaneOutboxEntry[]>([]);
+  const loadAgentsInFlightRef = useRef<Promise<void> | null>(null);
+  const startupFleetBootstrapCompletedKeyRef = useRef<string | null>(null);
+  const startupFleetBootstrapInFlightKeyRef = useRef<string | null>(null);
 
   const agents = state.agents;
   const selectedAgent = useMemo(() => getSelectedAgent(state), [state]);
@@ -502,32 +520,47 @@ const AgentStudioPage = () => {
   }, [specialLatestUpdate]);
 
   const loadAgents = useCallback(async () => {
-    if (!coreConnected) return;
-    setLoading(true);
+    const inFlight = loadAgentsInFlightRef.current;
+    if (inFlight) {
+      await inFlight;
+      return;
+    }
+    const run = (async () => {
+      if (!coreConnected) return;
+      setLoading(true);
+      try {
+        const commands = await runStudioBootstrapLoadOperation({
+          client,
+          gatewayUrl,
+          cachedConfigSnapshot: gatewayConfigSnapshot,
+          loadStudioSettings: settingsCoordinator.loadSettings.bind(settingsCoordinator),
+          isDisconnectLikeError: isGatewayDisconnectLikeError,
+          preferredSelectedAgentId: preferredSelectedAgentIdRef.current,
+          hasCurrentSelection: Boolean(stateRef.current.selectedAgentId),
+          useDomainApiMode,
+          logError: (message, error) => console.error(message, error),
+        });
+        executeStudioBootstrapLoadCommands({
+          commands,
+          setGatewayConfigSnapshot,
+          hydrateAgents,
+          dispatchUpdateAgent: (agentId, patch) => {
+            dispatch({ type: "updateAgent", agentId, patch });
+          },
+          setError,
+        });
+      } finally {
+        setLoading(false);
+        setAgentsLoadedOnce(true);
+      }
+    })();
+    loadAgentsInFlightRef.current = run;
     try {
-      const commands = await runStudioBootstrapLoadOperation({
-        client,
-        gatewayUrl,
-        cachedConfigSnapshot: gatewayConfigSnapshot,
-        loadStudioSettings: settingsCoordinator.loadSettings.bind(settingsCoordinator),
-        isDisconnectLikeError: isGatewayDisconnectLikeError,
-        preferredSelectedAgentId: preferredSelectedAgentIdRef.current,
-        hasCurrentSelection: Boolean(stateRef.current.selectedAgentId),
-        useDomainApiMode,
-        logError: (message, error) => console.error(message, error),
-      });
-      executeStudioBootstrapLoadCommands({
-        commands,
-        setGatewayConfigSnapshot,
-        hydrateAgents,
-        dispatchUpdateAgent: (agentId, patch) => {
-          dispatch({ type: "updateAgent", agentId, patch });
-        },
-        setError,
-      });
+      await run;
     } finally {
-      setLoading(false);
-      setAgentsLoadedOnce(true);
+      if (loadAgentsInFlightRef.current === run) {
+        loadAgentsInFlightRef.current = null;
+      }
     }
   }, [
     client,
@@ -712,10 +745,30 @@ const AgentStudioPage = () => {
   ]);
 
   useEffect(() => {
-    if (!coreConnected || !focusedPreferencesLoaded) return;
-    if (restartingMutationBlock && restartingMutationBlock.phase !== "queued") return;
-    if (createAgentBlock && createAgentBlock.phase !== "queued") return;
-    void loadAgents();
+    const intent = planStartupFleetBootstrapIntent({
+      coreConnected,
+      focusedPreferencesLoaded,
+      hasRestartingMutationBlock: Boolean(
+        restartingMutationBlock && restartingMutationBlock.phase !== "queued"
+      ),
+      hasCreateAgentBlock: Boolean(createAgentBlock && createAgentBlock.phase !== "queued"),
+      gatewayUrl,
+      useDomainApiMode,
+      lastCompletedKey: startupFleetBootstrapCompletedKeyRef.current,
+      inFlightKey: startupFleetBootstrapInFlightKeyRef.current,
+    });
+    if (intent.kind !== "load") return;
+    startupFleetBootstrapInFlightKeyRef.current = intent.key;
+    void (async () => {
+      try {
+        await loadAgents();
+        startupFleetBootstrapCompletedKeyRef.current = intent.key;
+      } finally {
+        if (startupFleetBootstrapInFlightKeyRef.current === intent.key) {
+          startupFleetBootstrapInFlightKeyRef.current = null;
+        }
+      }
+    })();
   }, [
     coreConnected,
     createAgentBlock,
@@ -723,7 +776,19 @@ const AgentStudioPage = () => {
     gatewayUrl,
     loadAgents,
     restartingMutationBlock,
+    useDomainApiMode,
   ]);
+
+  useEffect(() => {
+    if (coreConnected && focusedPreferencesLoaded) return;
+    startupFleetBootstrapCompletedKeyRef.current = null;
+    startupFleetBootstrapInFlightKeyRef.current = null;
+  }, [coreConnected, focusedPreferencesLoaded]);
+
+  useEffect(() => {
+    startupFleetBootstrapCompletedKeyRef.current = null;
+    startupFleetBootstrapInFlightKeyRef.current = null;
+  }, [gatewayUrl, useDomainApiMode]);
 
   useEffect(() => {
     if (!coreConnected) {
@@ -1178,13 +1243,13 @@ const AgentStudioPage = () => {
         },
         requestHistoryRefresh: (agentId) => loadAgentHistory(agentId),
         pausedRunIdByAgentId: approvalPausedRunIdByAgentRef.current,
-        dispatch,
+        dispatch: dispatchAgentStoreAction,
         isDisconnectLikeError: isGatewayDisconnectLikeError,
         logWarn: (message, error) => console.warn(message, error),
         clearRunTracking: (runId) => runtimeEventHandlerRef.current?.clearRunTracking(runId),
       });
     },
-    [client, dispatch, loadAgentHistory, runtimeWriteTransport]
+    [client, dispatchAgentStoreAction, loadAgentHistory, runtimeWriteTransport]
   );
 
   const pauseRunForExecApproval = useCallback(
@@ -1235,11 +1300,11 @@ const AgentStudioPage = () => {
         },
         pauseRunForApproval: (approval, commandPreferredAgentId) =>
           pauseRunForExecApproval(approval, commandPreferredAgentId),
-        dispatch,
+        dispatch: dispatchAgentStoreAction,
         recordCronDedupeKey: (dedupeKey) => seenCronEventIdsRef.current.add(dedupeKey),
       });
     },
-    [dispatch, pauseRunForExecApproval]
+    [dispatchAgentStoreAction, pauseRunForExecApproval]
   );
   domainEventIngressRef.current = handleGatewayEventIngress;
 
@@ -1247,7 +1312,7 @@ const AgentStudioPage = () => {
     const handler = createGatewayRuntimeEventHandler({
       getStatus: () => coreStatus,
       getAgents: () => stateRef.current.agents,
-      dispatch,
+      dispatch: dispatchAgentStoreAction,
       queueLivePatch,
       clearPendingLivePatch,
       loadSummarySnapshot,
@@ -1275,50 +1340,32 @@ const AgentStudioPage = () => {
       pendingDomainOutboxEntriesRef.current = [];
       ingestDomainOutboxEntries(pendingEntries);
     }
-    let stream: EventSource | null = null;
-    stream = new EventSource("/api/runtime/stream");
-    stream.addEventListener("gateway.event", (raw) => {
-      const message = raw as MessageEvent<string>;
-      try {
-        const parsed = JSON.parse(message.data) as {
-          event?: string;
-          payload?: unknown;
-          seq?: number;
-        };
-        if (typeof parsed.event !== "string") return;
-        const frame: EventFrame = {
-          type: "event",
-          event: parsed.event,
-          payload: parsed.payload,
-          ...(typeof parsed.seq === "number" ? { seq: parsed.seq } : {}),
-        };
-        handler.handleEvent(frame);
-        handleGatewayEventIngress(frame);
-      } catch {}
-    });
-    stream.addEventListener("runtime.status", () => {
-      void loadSummarySnapshot();
-    });
-    stream.onerror = () => {
-      // EventSource performs automatic reconnect; keep warning low-noise.
-    };
     return () => {
       runtimeEventHandlerRef.current = null;
       handler.dispose();
-      stream?.close();
     };
   }, [
-    dispatch,
+    dispatchAgentStoreAction,
     loadAgentHistory,
     loadSummarySnapshot,
     clearPendingLivePatch,
     queueLivePatch,
     refreshHeartbeatLatestUpdate,
     specialLatestUpdate,
-    handleGatewayEventIngress,
     ingestDomainOutboxEntries,
     coreStatus,
   ]);
+
+  useRuntimeEventStream({
+    onGatewayEvent: (event) => {
+      runtimeEventHandlerRef.current?.handleEvent(event);
+      domainEventIngressRef.current(event);
+    },
+    onRuntimeStatus: () => {
+      void loadSummarySnapshot();
+    },
+    resumeKey: runtimeStreamResumeKey ?? undefined,
+  });
 
   const handleAvatarShuffle = useCallback(
     async (agentId: string) => {

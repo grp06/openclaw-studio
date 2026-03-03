@@ -139,10 +139,10 @@ describe("AgentChatPanel scrolling", () => {
     Object.defineProperty(scrollEl, "scrollTop", { value: 120, writable: true, configurable: true });
 
     fireEvent.scroll(scrollEl);
-    expect(screen.queryByText(/Showing most recent 200 messages/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Showing latest 200 turns/i)).not.toBeInTheDocument();
 
     scrollEl.scrollTop = 0;
     fireEvent.scroll(scrollEl);
-    expect(screen.getByText(/Showing most recent 200 messages/i)).toBeInTheDocument();
+    expect(screen.getByText(/Showing latest 200 turns/i)).toBeInTheDocument();
   });
 });

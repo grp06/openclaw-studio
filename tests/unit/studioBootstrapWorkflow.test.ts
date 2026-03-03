@@ -5,6 +5,7 @@ import {
   planFocusedFilterPatch,
   planFocusedPreferenceRestore,
   planFocusedSelectionPatch,
+  planStartupFleetBootstrapIntent,
 } from "@/features/agents/operations/studioBootstrapWorkflow";
 import type { StudioSettings } from "@/lib/studio/settings";
 
@@ -202,6 +203,56 @@ describe("studioBootstrapWorkflow", () => {
     ).toEqual({
       preferredSelectedAgentId: "agent-7",
       focusFilter: "all",
+    });
+  });
+
+  it("plans startup fleet bootstrap only once per gateway/mode key", () => {
+    expect(
+      planStartupFleetBootstrapIntent({
+        coreConnected: true,
+        focusedPreferencesLoaded: true,
+        hasRestartingMutationBlock: false,
+        hasCreateAgentBlock: false,
+        gatewayUrl: "https://gateway.test",
+        useDomainApiMode: true,
+        lastCompletedKey: null,
+        inFlightKey: null,
+      })
+    ).toEqual({
+      kind: "load",
+      key: "domain:https://gateway.test",
+    });
+
+    expect(
+      planStartupFleetBootstrapIntent({
+        coreConnected: true,
+        focusedPreferencesLoaded: true,
+        hasRestartingMutationBlock: false,
+        hasCreateAgentBlock: false,
+        gatewayUrl: "https://gateway.test",
+        useDomainApiMode: true,
+        lastCompletedKey: "domain:https://gateway.test",
+        inFlightKey: null,
+      })
+    ).toEqual({
+      kind: "skip",
+      reason: "already-loaded",
+    });
+
+    expect(
+      planStartupFleetBootstrapIntent({
+        coreConnected: true,
+        focusedPreferencesLoaded: true,
+        hasRestartingMutationBlock: false,
+        hasCreateAgentBlock: false,
+        gatewayUrl: "https://gateway.test",
+        useDomainApiMode: true,
+        lastCompletedKey: null,
+        inFlightKey: "domain:https://gateway.test",
+      })
+    ).toEqual({
+      kind: "skip",
+      reason: "in-flight",
     });
   });
 });

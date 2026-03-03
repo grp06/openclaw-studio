@@ -29,6 +29,12 @@ type ChatSendOperationResult = {
   ok: boolean;
 };
 
+const resolveOptimisticUserEntryId = (runId: string): string | undefined => {
+  const normalizedRunId = runId.trim();
+  if (!normalizedRunId) return undefined;
+  return `run:${normalizedRunId}:user`;
+};
+
 const resolveLatestTranscriptTimestampMs = (agent: AgentState): number | null => {
   const entries = agent.transcriptEntries;
   let latest: number | null = null;
@@ -158,6 +164,7 @@ export async function sendChatMessageViaStudio(params: {
         timestampMs: optimisticUserOrderTimestamp,
         role: "user",
         kind: "user",
+        entryId: resolveOptimisticUserEntryId(runId),
       },
     });
   }

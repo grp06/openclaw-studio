@@ -718,6 +718,9 @@ describe("sendChatMessageViaStudio", () => {
       );
     expect(optimisticUserAppend).toBeTruthy();
     expect((optimisticUserAppend as { transcript?: { timestampMs?: number } }).transcript?.timestampMs).toBe(5001);
+    expect(
+      (optimisticUserAppend as { transcript?: { entryId?: string } }).transcript?.entryId
+    ).toBe("run:run-1:user");
   });
 
   it("uses_output_meta_timestamps_when_transcript_entries_are_missing", async () => {

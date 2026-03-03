@@ -139,6 +139,60 @@ describe("gateway runtime event handler (chat)", () => {
     expect(queueLivePatch).not.toHaveBeenCalled();
   });
 
+  it("appends confirmed user turns during chat-final replay", () => {
+    const agents = [createAgent({ status: "running", runId: "run-1", runStartedAt: 900 })];
+    const queueLivePatch = vi.fn();
+    const dispatched: Array<Record<string, unknown>> = [];
+    const dispatch = vi.fn((action) => {
+      dispatched.push(action as Record<string, unknown>);
+    });
+
+    const handler = createGatewayRuntimeEventHandler({
+      getStatus: () => "connected",
+      getAgents: () => agents,
+      dispatch,
+      queueLivePatch,
+      clearPendingLivePatch: vi.fn(),
+      now: () => 1000,
+      loadSummarySnapshot: vi.fn(async () => {}),
+      requestHistoryRefresh: vi.fn(async () => {}),
+      refreshHeartbeatLatestUpdate: vi.fn(),
+      bumpHeartbeatTick: vi.fn(),
+      setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
+      clearTimeout: (id) => clearTimeout(id as unknown as NodeJS.Timeout),
+      isDisconnectLikeError: () => false,
+      logWarn: vi.fn(),
+      updateSpecialLatestUpdate: vi.fn(),
+    });
+
+    handler.handleEvent({
+      type: "event",
+      event: "chat",
+      payload: {
+        runId: "run-1",
+        sessionKey: agents[0]!.sessionKey,
+        state: "final",
+        message: {
+          role: "user",
+          content: "Hello from history",
+          timestamp: "2026-03-03T12:00:00.000Z",
+        },
+      },
+    });
+
+    expect(queueLivePatch).not.toHaveBeenCalled();
+    expect(
+      dispatched.some(
+        (action) =>
+          action.type === "appendOutput" &&
+          action.line === "> Hello from history" &&
+          (action.transcript as { entryId?: string; confirmed?: boolean } | undefined)?.entryId ===
+            "run:run-1:user" &&
+          (action.transcript as { confirmed?: boolean } | undefined)?.confirmed === true
+      )
+    ).toBe(true);
+  });
+
   it("ignores stale delta chat events for non-active runIds", () => {
     const agents = [
       createAgent({

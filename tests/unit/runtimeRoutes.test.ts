@@ -288,7 +288,7 @@ describe("runtime routes", () => {
     }>("@/app/api/runtime/agents/[agentId]/history/route", runtimeMock);
 
     const firstResponse = await mod.GET(
-      new Request("http://localhost/api/runtime/agents/alpha/history?limit=2"),
+      new Request("http://localhost/api/runtime/agents/alpha/history?view=raw&limit=2"),
       { params: Promise.resolve({ agentId: "alpha" }) }
     );
     expect(firstResponse.status).toBe(200);
@@ -302,7 +302,9 @@ describe("runtime routes", () => {
     expect(firstBody.nextBeforeOutboxId).toBe(3);
 
     const secondResponse = await mod.GET(
-      new Request("http://localhost/api/runtime/agents/alpha/history?limit=2&beforeOutboxId=3"),
+      new Request(
+        "http://localhost/api/runtime/agents/alpha/history?view=raw&limit=2&beforeOutboxId=3"
+      ),
       { params: Promise.resolve({ agentId: "alpha" }) }
     );
     expect(secondResponse.status).toBe(200);
@@ -395,7 +397,7 @@ describe("runtime routes", () => {
     }>("@/app/api/runtime/agents/[agentId]/history/route", runtimeMock);
 
     const response = await mod.GET(
-      new Request("http://localhost/api/runtime/agents/alpha/history?limit=2"),
+      new Request("http://localhost/api/runtime/agents/alpha/history?view=raw&limit=2"),
       { params: Promise.resolve({ agentId: "alpha" }) }
     );
     expect(response.status).toBe(200);
@@ -442,7 +444,7 @@ describe("runtime routes", () => {
     }>("@/app/api/runtime/agents/[agentId]/history/route", runtimeMock);
 
     const response = await mod.GET(
-      new Request("http://localhost/api/runtime/agents/alpha/history?limit=2"),
+      new Request("http://localhost/api/runtime/agents/alpha/history?view=raw&limit=2"),
       { params: Promise.resolve({ agentId: "alpha" }) }
     );
     expect(response.status).toBe(200);

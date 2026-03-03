@@ -29,7 +29,9 @@ import {
   extractText,
   extractThinking,
   extractToolLines,
+  formatMetaMarkdown,
   isTraceMarkdown,
+  isUiMetadataPrefix,
   stripUiMetadata,
 } from "@/lib/text/message-extract";
 import { planRuntimeChatEvent } from "@/features/agents/state/runtimeChatEventWorkflow";
@@ -86,6 +88,51 @@ const resolveRole = (message: unknown) =>
   message && typeof message === "object"
     ? (message as Record<string, unknown>).role
     : null;
+
+const toTimestampMs = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return null;
+};
+
+const resolveMessageTimestampMs = (message: unknown): number | null => {
+  if (!message || typeof message !== "object") return null;
+  const record = message as Record<string, unknown>;
+  return (
+    toTimestampMs(record.timestamp) ??
+    toTimestampMs(record.createdAt) ??
+    toTimestampMs(record.at)
+  );
+};
+
+const resolveRuntimeChatUserEntryId = (
+  payload: ChatEventPayload,
+  suffix: "meta" | "message"
+): string | undefined => {
+  const normalizedRunId = payload.runId?.trim() ?? "";
+  if (normalizedRunId) {
+    return suffix === "meta"
+      ? `run:${normalizedRunId}:user:meta`
+      : `run:${normalizedRunId}:user`;
+  }
+  if (typeof payload.seq !== "number" || !Number.isFinite(payload.seq)) {
+    return undefined;
+  }
+  const normalizedSessionKey = payload.sessionKey.trim();
+  if (!normalizedSessionKey) return undefined;
+  const normalizedSeq = Math.floor(payload.seq);
+  if (suffix === "meta") {
+    return `session:${normalizedSessionKey}:chat-user:${normalizedSeq}:meta`;
+  }
+  return `session:${normalizedSessionKey}:chat-user:${normalizedSeq}`;
+};
 
 export function createGatewayRuntimeEventHandler(
   deps: GatewayRuntimeEventHandlerDeps
@@ -312,7 +359,54 @@ export function createGatewayRuntimeEventHandler(
       });
     }
 
-    if (role === "user" || role === "system") {
+    if (role === "user") {
+      if (payload.state !== "delta") {
+        const rawUserText = extractText(payload.message);
+        const trimmedRawUserText = rawUserText?.trim() ?? "";
+        if (trimmedRawUserText && !isUiMetadataPrefix(trimmedRawUserText)) {
+          const normalizedUserText = stripUiMetadata(trimmedRawUserText).trim();
+          if (normalizedUserText) {
+            const timestampMs = resolveMessageTimestampMs(payload.message) ?? nowMs;
+            deps.dispatch({
+              type: "appendOutput",
+              agentId,
+              line: formatMetaMarkdown({
+                role: "user",
+                timestamp: timestampMs,
+              }),
+              transcript: {
+                source: "runtime-chat",
+                runId: payload.runId ?? null,
+                sessionKey: payload.sessionKey,
+                timestampMs,
+                role: "user",
+                kind: "meta",
+                entryId: resolveRuntimeChatUserEntryId(payload, "meta"),
+                confirmed: true,
+              },
+            });
+            deps.dispatch({
+              type: "appendOutput",
+              agentId,
+              line: `> ${normalizedUserText}`,
+              transcript: {
+                source: "runtime-chat",
+                runId: payload.runId ?? null,
+                sessionKey: payload.sessionKey,
+                timestampMs,
+                role: "user",
+                kind: "user",
+                entryId: resolveRuntimeChatUserEntryId(payload, "message"),
+                confirmed: true,
+              },
+            });
+          }
+        }
+      }
+      return;
+    }
+
+    if (role === "system") {
       return;
     }
 
