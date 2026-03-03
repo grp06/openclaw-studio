@@ -116,6 +116,14 @@ import { useSettingsRouteController } from "@/features/agents/operations/useSett
 const PENDING_EXEC_APPROVAL_PRUNE_GRACE_MS = 500;
 
 type MobilePane = "fleet" | "chat";
+const SETTINGS_SIDEBAR_ENTRIES = [
+  { id: "personality", label: "Behavior" },
+  { id: "capabilities", label: "Capabilities" },
+  { id: "skills", label: "Skills" },
+  { id: "system", label: "System setup" },
+  { id: "automations", label: "Automations" },
+  { id: "advanced", label: "Advanced" },
+] as const;
 type SettingsSidebarItem = SettingsRouteTab;
 
 const RESERVED_MAIN_AGENT_ID = "main";
@@ -243,6 +251,7 @@ const AgentStudioPage = () => {
   const [createAgentModalOpen, setCreateAgentModalOpen] = useState(false);
   const [createAgentModalError, setCreateAgentModalError] = useState<string | null>(null);
   const [mobilePane, setMobilePane] = useState<MobilePane>("chat");
+  const [mobileSettingsMenuOpen, setMobileSettingsMenuOpen] = useState(false);
   const [inspectSidebar, setInspectSidebar] = useState<InspectSidebarState>(null);
   const [systemInitialSkillKey, setSystemInitialSkillKey] = useState<string | null>(null);
   const [personalityHasUnsavedChanges, setPersonalityHasUnsavedChanges] = useState(false);
@@ -300,6 +309,10 @@ const AgentStudioPage = () => {
   useEffect(() => {
     setSettingsSidebarItem(effectiveSettingsTab);
   }, [effectiveSettingsTab]);
+
+  useEffect(() => {
+    setMobileSettingsMenuOpen(false);
+  }, [effectiveSettingsTab, settingsRouteAgentId, settingsRouteActive]);
   const inspectSidebarAgent = useMemo(() => {
     if (!inspectSidebarAgentId) return null;
     return agents.find((entry) => entry.agentId === inspectSidebarAgentId) ?? null;
@@ -1397,7 +1410,7 @@ const AgentStudioPage = () => {
               className="ui-panel ui-depth-workspace flex min-h-0 flex-1 overflow-hidden"
               data-testid="agent-settings-route-panel"
             >
-              <aside className="w-[240px] shrink-0 border-r border-border/60">
+              <aside className="hidden w-[240px] shrink-0 border-r border-border/60 md:block">
                 <div className="border-b border-border/60 px-4 py-3">
                   <button
                     type="button"
@@ -1408,16 +1421,7 @@ const AgentStudioPage = () => {
                   </button>
                 </div>
                 <nav className="py-3">
-                  {(
-                    [
-                      { id: "personality", label: "Behavior" },
-                      { id: "capabilities", label: "Capabilities" },
-                      { id: "skills", label: "Skills" },
-                      { id: "system", label: "System setup" },
-                      { id: "automations", label: "Automations" },
-                      { id: "advanced", label: "Advanced" },
-                    ] as const
-                  ).map((entry) => {
+                  {SETTINGS_SIDEBAR_ENTRIES.map((entry) => {
                     const active = activeSettingsSidebarItem === entry.id;
                     return (
                       <button
@@ -1446,7 +1450,54 @@ const AgentStudioPage = () => {
                 </nav>
               </aside>
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <div className="flex items-start justify-between border-b border-border/60 px-6 py-4">
+                <div className="border-b border-border/60 px-3 py-3 md:hidden">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="ui-btn-secondary px-3 py-1.5 font-mono text-[10px] font-semibold tracking-[0.06em]"
+                      onClick={handleBackToChat}
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-btn-secondary ml-auto px-3 py-1.5 font-mono text-[10px] font-semibold tracking-[0.06em]"
+                      aria-label="Open settings menu"
+                      aria-expanded={mobileSettingsMenuOpen}
+                      onClick={() => {
+                        setMobileSettingsMenuOpen((current) => !current);
+                      }}
+                    >
+                      ☰ Menu
+                    </button>
+                  </div>
+                  {mobileSettingsMenuOpen ? (
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {SETTINGS_SIDEBAR_ENTRIES.map((entry) => {
+                        const active = activeSettingsSidebarItem === entry.id;
+                        return (
+                          <button
+                            key={`mobile-settings-${entry.id}`}
+                            type="button"
+                            className={`rounded-md border px-2 py-1.5 text-left text-[12px] transition ${
+                              active
+                                ? "border-primary/40 bg-primary/12 text-foreground"
+                                : "border-border/70 bg-surface-1 text-muted-foreground hover:text-foreground"
+                            }`}
+                            onClick={() => {
+                              setSettingsSidebarItem(entry.id);
+                              handleSettingsRouteTabChange(entry.id);
+                              setMobileSettingsMenuOpen(false);
+                            }}
+                          >
+                            {entry.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex flex-col gap-2 border-b border-border/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:py-4">
                   <div>
                     <div className="text-lg font-semibold text-foreground">
                       {inspectSidebarAgent?.name ?? settingsRouteAgentId ?? "Agent settings"}
@@ -1471,7 +1522,7 @@ const AgentStudioPage = () => {
                         onUnsavedChangesChange={setPersonalityHasUnsavedChanges}
                       />
                     ) : (
-                      <div className="h-full overflow-y-auto px-6 py-6">
+                      <div className="h-full overflow-y-auto px-3 py-4 sm:px-6 sm:py-6">
                         <div className="mx-auto w-full max-w-[920px]">
                           <AgentSettingsPanel
                             key={`${inspectSidebarAgent.agentId}:${effectiveSettingsTab}`}
