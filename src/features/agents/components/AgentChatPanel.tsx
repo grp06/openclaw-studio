@@ -988,7 +988,7 @@ const AgentChatComposer = memo(function AgentChatComposer({
           ref={inputRef}
           rows={1}
           value={value}
-          className="chat-composer-input min-h-[28px] max-h-[34vh] min-w-0 flex-1 resize-none border-0 bg-transparent px-0 py-1 text-[15px] leading-6 text-foreground outline-none shadow-none transition placeholder:text-muted-foreground/65 focus:outline-none focus-visible:outline-none focus-visible:ring-0"
+          className="chat-composer-input min-h-[28px] max-h-[34vh] min-w-0 flex-1 resize-none border-0 bg-transparent px-0 py-1 text-[16px] leading-6 text-foreground outline-none shadow-none transition placeholder:text-muted-foreground/65 focus:outline-none focus-visible:outline-none focus-visible:ring-0 sm:text-[15px]"
           onChange={onChange}
           onKeyDown={onKeyDown}
           placeholder="type a message"
@@ -996,7 +996,7 @@ const AgentChatComposer = memo(function AgentChatComposer({
         {running ? (
           <span className="inline-flex" title={stopReason || undefined}>
             <button
-              className="shrink-0 rounded-md border border-border/70 bg-surface-3 px-3 py-2 font-mono text-[12px] font-medium tracking-[0.02em] text-foreground transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
+              className="shrink-0 rounded-md border border-border/70 bg-surface-3 px-3.5 py-2.5 font-mono text-[12px] font-medium tracking-[0.02em] text-foreground transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground sm:px-3 sm:py-2"
               type="button"
               onClick={onStop}
               disabled={stopDisabled}
@@ -1007,7 +1007,7 @@ const AgentChatComposer = memo(function AgentChatComposer({
           </span>
         ) : null}
         <button
-          className="ui-btn-primary ui-btn-send shrink-0 px-3 py-2 font-mono text-[12px] font-medium tracking-[0.02em] disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
+          className="ui-btn-primary ui-btn-send shrink-0 px-3.5 py-2.5 font-mono text-[12px] font-medium tracking-[0.02em] disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground sm:px-3 sm:py-2"
           type="button"
           onClick={onSend}
           disabled={sendDisabled}
