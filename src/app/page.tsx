@@ -1627,7 +1627,7 @@ const AgentStudioPage = () => {
                 />
               </div>
               <div
-                className={`${mobilePane === "chat" ? "flex" : "hidden"} ui-panel ui-depth-workspace min-h-0 flex-1 overflow-hidden xl:flex`}
+                className={`${mobilePane === "chat" ? "flex" : "hidden"} ui-panel ui-depth-workspace min-h-0 flex-1 overflow-x-hidden overflow-y-auto xl:flex xl:overflow-hidden`}
                 data-testid="focused-agent-panel"
               >
                 {focusedAgent ? (

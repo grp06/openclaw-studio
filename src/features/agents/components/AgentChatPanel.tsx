@@ -735,7 +735,7 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
       <div
         ref={chatRef}
         data-testid="agent-chat-scroll"
-        className={`ui-chat-scroll ui-chat-scroll-borderless h-full overflow-auto p-3 sm:p-5 dark:sm:p-7 ${showJumpToLatest ? "pb-20" : ""}`}
+        className={`ui-chat-scroll ui-chat-scroll-borderless h-full overflow-x-hidden overflow-y-auto p-3 sm:p-5 dark:sm:p-7 ${showJumpToLatest ? "pb-20" : ""}`}
         onScroll={() => updatePinnedFromScroll()}
         onWheel={(event) => {
           event.stopPropagation();
@@ -744,7 +744,7 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
           event.stopPropagation();
         }}
       >
-        <div className="relative flex flex-col gap-6 dark:gap-8 text-[14px] leading-[1.65] text-foreground">
+        <div className="relative flex min-w-0 flex-col gap-6 text-[14px] leading-[1.65] text-foreground dark:gap-8">
           <div aria-hidden className={`pointer-events-none absolute ${SPINE_LEFT} top-0 bottom-0 w-px bg-border/20`} />
           {historyMaybeTruncated && isAtTop ? (
             <div className="-mx-1 flex items-center justify-between gap-3 rounded-md bg-surface-2 px-3 py-2 shadow-2xs">
@@ -923,7 +923,7 @@ const AgentChatComposer = memo(function AgentChatComposer({
   }, [thinkingValue]);
   const thinkingSelectWidthCh = Math.max(9, Math.min(16, thinkingSelectedLabel.length + 6));
   return (
-    <div className="rounded-2xl border border-border/65 bg-surface-2/45 px-3 py-2">
+    <div className="w-full max-w-full overflow-hidden rounded-2xl border border-border/65 bg-surface-2/45 px-3 py-2">
       {queuedMessages.length > 0 ? (
         <div
           className={`mb-2 grid items-start gap-2 ${
@@ -983,12 +983,12 @@ const AgentChatComposer = memo(function AgentChatComposer({
           </button>
         </div>
       ) : null}
-      <div className="flex items-end gap-2">
+      <div className="flex min-w-0 items-end gap-2">
         <textarea
           ref={inputRef}
           rows={1}
           value={value}
-          className="chat-composer-input min-h-[28px] flex-1 resize-none border-0 bg-transparent px-0 py-1 text-[15px] leading-6 text-foreground outline-none shadow-none transition placeholder:text-muted-foreground/65 focus:outline-none focus-visible:outline-none focus-visible:ring-0"
+          className="chat-composer-input min-h-[28px] max-h-[34vh] min-w-0 flex-1 resize-none border-0 bg-transparent px-0 py-1 text-[15px] leading-6 text-foreground outline-none shadow-none transition placeholder:text-muted-foreground/65 focus:outline-none focus-visible:outline-none focus-visible:ring-0"
           onChange={onChange}
           onKeyDown={onKeyDown}
           placeholder="type a message"
@@ -996,7 +996,7 @@ const AgentChatComposer = memo(function AgentChatComposer({
         {running ? (
           <span className="inline-flex" title={stopReason || undefined}>
             <button
-              className="rounded-md border border-border/70 bg-surface-3 px-3 py-2 font-mono text-[12px] font-medium tracking-[0.02em] text-foreground transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
+              className="shrink-0 rounded-md border border-border/70 bg-surface-3 px-3 py-2 font-mono text-[12px] font-medium tracking-[0.02em] text-foreground transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
               type="button"
               onClick={onStop}
               disabled={stopDisabled}
@@ -1007,7 +1007,7 @@ const AgentChatComposer = memo(function AgentChatComposer({
           </span>
         ) : null}
         <button
-          className="ui-btn-primary ui-btn-send px-3 py-2 font-mono text-[12px] font-medium tracking-[0.02em] disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
+          className="ui-btn-primary ui-btn-send shrink-0 px-3 py-2 font-mono text-[12px] font-medium tracking-[0.02em] disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
           type="button"
           onClick={onSend}
           disabled={sendDisabled}
@@ -1062,14 +1062,14 @@ const AgentChatComposer = memo(function AgentChatComposer({
             </InlineHoverTooltip>
           ) : null}
         </div>
-        <div className="flex w-full items-center justify-end gap-1.5 text-[10px] text-muted-foreground sm:ml-auto sm:w-auto">
+        <div className="flex w-full flex-wrap items-center justify-end gap-1.5 text-[10px] text-muted-foreground sm:ml-auto sm:w-auto sm:flex-nowrap">
           <span className="font-mono tracking-[0.02em]">Show</span>
           <button
             type="button"
             role="switch"
             aria-label="Show tool calls"
             aria-checked={toolCallingEnabled}
-            className={`inline-flex h-5 items-center rounded-sm border px-1.5 font-mono text-[10px] tracking-[0.01em] transition ${
+            className={`inline-flex h-5 shrink-0 items-center rounded-sm border px-1.5 font-mono text-[10px] tracking-[0.01em] transition ${
               toolCallingEnabled
                 ? "border-primary/45 bg-primary/14 text-foreground"
                 : "border-border/70 bg-surface-2/40 text-muted-foreground hover:text-foreground"
@@ -1083,7 +1083,7 @@ const AgentChatComposer = memo(function AgentChatComposer({
             role="switch"
             aria-label="Show thinking"
             aria-checked={showThinkingTraces}
-            className={`inline-flex h-5 items-center rounded-sm border px-1.5 font-mono text-[10px] tracking-[0.01em] transition ${
+            className={`inline-flex h-5 shrink-0 items-center rounded-sm border px-1.5 font-mono text-[10px] tracking-[0.01em] transition ${
               showThinkingTraces
                 ? "border-primary/45 bg-primary/14 text-foreground"
                 : "border-border/70 bg-surface-2/40 text-muted-foreground hover:text-foreground"
@@ -1380,7 +1380,7 @@ export const AgentChatPanel = ({
   const newSessionDisabled = newSessionBusy || !canSend || !onNewSession;
 
   return (
-    <div data-agent-panel className="group fade-up relative flex h-full w-full flex-col">
+    <div data-agent-panel className="group fade-up relative flex h-full w-full min-w-0 flex-col overflow-hidden">
       <div className="px-3 pt-2 sm:px-4 sm:pt-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
