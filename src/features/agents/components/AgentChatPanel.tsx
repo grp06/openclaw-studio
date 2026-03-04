@@ -7,13 +7,14 @@ import {
   useState,
   type ChangeEvent,
   type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
   type ReactNode,
 } from "react";
 import type { AgentState as AgentRecord } from "@/features/agents/state/store";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, ChevronRight, Clock, Cog, Pencil, Shuffle, Trash2, X } from "lucide-react";
+import { Check, ChevronRight, Clock, Cog, Maximize2, Pencil, Shuffle, Trash2, X } from "lucide-react";
 import type { GatewayModelChoice } from "@/lib/gateway/models";
 import { rewriteMediaLinesToMarkdown } from "@/lib/text/media-markdown";
 import { normalizeAssistantDisplayText } from "@/lib/text/assistantText";
@@ -1146,6 +1147,7 @@ export const AgentChatPanel = ({
   const [renameDraft, setRenameDraft] = useState(agent.name);
   const [renameError, setRenameError] = useState<string | null>(null);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [transcriptModalOpen, setTranscriptModalOpen] = useState(false);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const renameEditorRef = useRef<HTMLDivElement | null>(null);
@@ -1199,6 +1201,7 @@ export const AgentChatPanel = ({
 
   useEffect(() => {
     setVoiceEnabled(false);
+    setTranscriptModalOpen(false);
   }, [agent.agentId, agent.sessionKey]);
 
   useEffect(() => {
@@ -1336,6 +1339,13 @@ export const AgentChatPanel = ({
     },
     [agent.agentId, canSend, onSend]
   );
+
+  const handleTranscriptOpen = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (typeof window !== "undefined" && window.innerWidth >= 1280) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("button, a, input, textarea, summary, details")) return;
+    setTranscriptModalOpen(true);
+  }, []);
 
   const beginRename = useCallback(() => {
     if (!onRename) return;
@@ -1518,6 +1528,15 @@ export const AgentChatPanel = ({
 
           <div className="mt-0.5 flex w-full items-center justify-end gap-2 sm:w-auto">
             <button
+              className="nodrag ui-btn-icon xl:hidden"
+              type="button"
+              aria-label="Expand transcript"
+              title="Expand transcript"
+              onClick={() => setTranscriptModalOpen(true)}
+            >
+              <Maximize2 className="h-4 w-4" />
+            </button>
+            <button
               className="nodrag ui-btn-primary px-2.5 py-1.5 font-mono text-[11px] font-medium tracking-[0.02em] disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
               type="button"
               data-testid="agent-new-session-toggle"
@@ -1545,29 +1564,31 @@ export const AgentChatPanel = ({
       </div>
 
       <div className="mt-3 flex min-h-0 flex-1 flex-col px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4 sm:pb-4">
-        <AgentChatTranscript
-          agentId={agent.agentId}
-          name={agent.name}
-          avatarSeed={avatarSeed}
-          avatarUrl={agent.avatarUrl ?? null}
-          status={agent.status}
-          historyMaybeTruncated={agent.historyMaybeTruncated}
-          historyFetchedCount={agent.historyFetchedCount}
-          historyFetchLimit={agent.historyFetchLimit}
-          onLoadMoreHistory={onLoadMoreHistory}
-          chatItems={chatItems}
-          liveThinkingText={liveThinkingText}
-          liveAssistantText={liveAssistantText}
-          showTypingIndicator={showTypingIndicator}
-          outputLineCount={agent.outputLines.length}
-          liveAssistantCharCount={liveAssistantText.length}
-          liveThinkingCharCount={liveThinkingText.length}
-          runStartedAt={agent.runStartedAt}
-          scrollToBottomNextOutputRef={scrollToBottomNextOutputRef}
-          pendingExecApprovals={pendingExecApprovals}
-          onResolveExecApproval={onResolveExecApproval}
-          emptyStateTitle={emptyStateTitle}
-        />
+        <div className="min-h-0 flex-1" onClickCapture={handleTranscriptOpen}>
+          <AgentChatTranscript
+            agentId={agent.agentId}
+            name={agent.name}
+            avatarSeed={avatarSeed}
+            avatarUrl={agent.avatarUrl ?? null}
+            status={agent.status}
+            historyMaybeTruncated={agent.historyMaybeTruncated}
+            historyFetchedCount={agent.historyFetchedCount}
+            historyFetchLimit={agent.historyFetchLimit}
+            onLoadMoreHistory={onLoadMoreHistory}
+            chatItems={chatItems}
+            liveThinkingText={liveThinkingText}
+            liveAssistantText={liveAssistantText}
+            showTypingIndicator={showTypingIndicator}
+            outputLineCount={agent.outputLines.length}
+            liveAssistantCharCount={liveAssistantText.length}
+            liveThinkingCharCount={liveThinkingText.length}
+            runStartedAt={agent.runStartedAt}
+            scrollToBottomNextOutputRef={scrollToBottomNextOutputRef}
+            pendingExecApprovals={pendingExecApprovals}
+            onResolveExecApproval={onResolveExecApproval}
+            emptyStateTitle={emptyStateTitle}
+          />
+        </div>
 
         <div className="mt-3">
           <AgentChatComposer
@@ -1602,6 +1623,45 @@ export const AgentChatPanel = ({
           />
         </div>
       </div>
+
+      {transcriptModalOpen ? (
+        <div className="fixed inset-0 z-[130] flex min-h-0 flex-col bg-background xl:hidden">
+          <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
+            <div className="truncate text-sm font-medium text-foreground">{agent.name} · Transcript</div>
+            <button
+              type="button"
+              className="ui-btn-secondary px-3 py-1.5 text-xs"
+              onClick={() => setTranscriptModalOpen(false)}
+            >
+              Close
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
+            <AgentChatTranscript
+              agentId={agent.agentId}
+              name={agent.name}
+              avatarSeed={avatarSeed}
+              avatarUrl={agent.avatarUrl ?? null}
+              status={agent.status}
+              historyMaybeTruncated={false}
+              historyFetchedCount={agent.historyFetchedCount}
+              historyFetchLimit={agent.historyFetchLimit}
+              onLoadMoreHistory={() => {}}
+              chatItems={chatItems}
+              liveThinkingText={liveThinkingText}
+              liveAssistantText={liveAssistantText}
+              showTypingIndicator={showTypingIndicator}
+              outputLineCount={agent.outputLines.length}
+              liveAssistantCharCount={liveAssistantText.length}
+              liveThinkingCharCount={liveThinkingText.length}
+              runStartedAt={agent.runStartedAt}
+              scrollToBottomNextOutputRef={scrollToBottomNextOutputRef}
+              pendingExecApprovals={[]}
+              emptyStateTitle={emptyStateTitle}
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };
