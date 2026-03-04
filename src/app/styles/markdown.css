@@ -1,14 +1,8 @@
 .agent-markdown {
   display: block;
   white-space: normal;
-  overflow-wrap: anywhere;
   word-break: break-word;
   line-height: 1.7;
-}
-
-.agent-markdown :is(p, li, blockquote, td, th) {
-  overflow-wrap: anywhere;
-  word-break: break-word;
 }
 
 .agent-markdown p {
@@ -122,12 +116,21 @@
 }
 
 .agent-markdown pre {
+  max-width: 100%;
+  min-width: 0;
   background: color-mix(in oklch, var(--surface-2) 94%, transparent);
   border-radius: 0.4rem;
   padding: 0.75rem 0.85rem;
   border: 1px solid color-mix(in oklch, var(--surface-selected-border) 82%, transparent);
   overflow-x: auto;
   line-height: 1.64;
+}
+
+.agent-markdown pre,
+.agent-markdown pre code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .agent-markdown pre code {

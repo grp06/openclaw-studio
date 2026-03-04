@@ -222,16 +222,14 @@ const ToolCallDetails = memo(function ToolCallDetails({
   if (inlineOnly) {
     return (
       <div className={resolvedClassName}>
-        <div className="min-w-0 break-all font-mono text-[10px] font-semibold tracking-[0.11em]">
-          {summaryText}
-        </div>
+        <div className="font-mono text-[10px] font-semibold tracking-[0.11em]">{summaryText}</div>
       </div>
     );
   }
   return (
     <details open={open} className={resolvedClassName}>
       <summary
-        className="min-w-0 break-all cursor-pointer select-none font-mono text-[10px] font-semibold tracking-[0.11em]"
+        className="cursor-pointer select-none font-mono text-[10px] font-semibold tracking-[0.11em]"
         onClick={(event) => {
           event.preventDefault();
           setOpen((current) => !current);
@@ -463,7 +461,7 @@ const AssistantMessageCard = memo(function AssistantMessageCard({
                   (() => {
                     if (!contentText.includes("MEDIA:")) {
                       return (
-                        <div className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-foreground">
+                        <div className="whitespace-pre-wrap break-words text-foreground">
                           {contentText}
                         </div>
                       );
@@ -471,7 +469,7 @@ const AssistantMessageCard = memo(function AssistantMessageCard({
                     const rewritten = rewriteMediaLinesToMarkdown(contentText);
                     if (!rewritten.includes("![](")) {
                       return (
-                        <div className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-foreground">
+                        <div className="whitespace-pre-wrap break-words text-foreground">
                           {contentText}
                         </div>
                       );
@@ -749,14 +747,14 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
         <div className="relative flex min-w-0 flex-col gap-6 text-[14px] leading-[1.65] text-foreground dark:gap-8">
           <div aria-hidden className={`pointer-events-none absolute ${SPINE_LEFT} top-0 bottom-0 w-px bg-border/20`} />
           {historyMaybeTruncated && isAtTop ? (
-            <div className="-mx-1 flex flex-col gap-2 rounded-md bg-surface-2 px-3 py-2 shadow-2xs sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-              <div className="type-meta min-w-0 break-words font-mono text-muted-foreground">
+            <div className="-mx-1 flex items-center justify-between gap-3 rounded-md bg-surface-2 px-3 py-2 shadow-2xs">
+              <div className="type-meta min-w-0 truncate font-mono text-muted-foreground">
                 Showing most recent {typeof historyFetchedCount === "number" ? historyFetchedCount : "?"} messages
                 {typeof historyFetchLimit === "number" ? ` (limit ${historyFetchLimit})` : ""}
               </div>
               <button
                 type="button"
-                className="inline-flex w-fit self-start rounded-md border border-border/70 bg-surface-3 px-3 py-1.5 font-mono text-[12px] font-medium tracking-[0.02em] text-foreground transition hover:bg-surface-2 sm:self-auto"
+                className="shrink-0 rounded-md border border-border/70 bg-surface-3 px-3 py-1.5 font-mono text-[12px] font-medium tracking-[0.02em] text-foreground transition hover:bg-surface-2"
                 onClick={onLoadMoreHistory}
               >
                 Load more
