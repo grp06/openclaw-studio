@@ -334,6 +334,35 @@ describe("AgentChatPanel controls", () => {
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
+  it("primes_and_toggles_voice_mode_with_expected_commands", () => {
+    const onSend = vi.fn();
+
+    render(
+      createElement(AgentChatPanel, {
+        agent: createAgent(),
+        isSelected: true,
+        canSend: true,
+        models,
+        stopBusy: false,
+        onLoadMoreHistory: vi.fn(),
+        onOpenSettings: vi.fn(),
+        onModelChange: vi.fn(),
+        onThinkingChange: vi.fn(),
+        onDraftChange: vi.fn(),
+        onSend,
+        onStopRun: vi.fn(),
+        onAvatarShuffle: vi.fn(),
+      })
+    );
+
+    fireEvent.click(screen.getByRole("switch", { name: /turn voice on/i }));
+    expect(onSend).toHaveBeenNthCalledWith(1, "/tts provider edge");
+    expect(onSend).toHaveBeenNthCalledWith(2, "/tts always");
+
+    fireEvent.click(screen.getByRole("switch", { name: /turn voice off/i }));
+    expect(onSend).toHaveBeenNthCalledWith(3, "/tts off");
+  });
+
   it("shows_stop_button_while_running_and_invokes_stop_handler", () => {
     const onStopRun = vi.fn();
 

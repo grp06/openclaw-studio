@@ -78,6 +78,10 @@ import {
 } from "@/features/agents/operations/latestUpdateWorkflow";
 import { createSpecialLatestUpdateOperation } from "@/features/agents/operations/specialLatestUpdateOperation";
 import {
+  decideInTabNotificationIntents,
+  type InTabNotificationState,
+} from "@/features/agents/operations/inTabNotificationsWorkflow";
+import {
   resolveAgentPermissionsDraft,
 } from "@/features/agents/operations/agentPermissionsOperation";
 import {
@@ -281,11 +285,12 @@ const AgentStudioPage = () => {
   >((input) => Promise.reject(new Error(`Config mutation queue not ready for "${input.kind}".`)));
   const approvalPausedRunIdByAgentRef = useRef<Map<string, string>>(new Map());
   const notificationsPrimedRef = useRef(false);
-  const lastFocusedAgentStatusRef = useRef<{ agentId: string | null; status: string | null }>({
-    agentId: null,
-    status: null,
+  const [inTabNotificationsEnabled] = useState(true);
+  const lastInTabNotificationStateRef = useRef<InTabNotificationState>({
+    focusedAgentId: null,
+    focusedAgentStatus: null,
+    focusedApprovalCount: 0,
   });
-  const lastFocusedApprovalCountRef = useRef(0);
 
   const agents = state.agents;
   const selectedAgent = useMemo(() => getSelectedAgent(state), [state]);
@@ -407,36 +412,38 @@ const AgentStudioPage = () => {
   }, [status]);
 
   useEffect(() => {
+    const currentState: InTabNotificationState = {
+      focusedAgentId: focusedAgent?.agentId ?? null,
+      focusedAgentStatus: focusedAgent?.status ?? null,
+      focusedApprovalCount: focusedPendingExecApprovals.length,
+    };
+    const previousState = lastInTabNotificationStateRef.current;
+    lastInTabNotificationStateRef.current = currentState;
+
     if (typeof window === "undefined" || !("Notification" in window)) return;
-    if (Notification.permission !== "granted") return;
 
-    const previous = lastFocusedAgentStatusRef.current;
-    const currentAgentId = focusedAgent?.agentId ?? null;
-    const currentStatus = focusedAgent?.status ?? null;
+    const intents = decideInTabNotificationIntents({
+      previous: previousState,
+      current: currentState,
+      focusedAgentName: focusedAgent?.name ?? null,
+      enabled: inTabNotificationsEnabled,
+      permission: Notification.permission,
+    });
 
-    if (previous.agentId !== currentAgentId) {
-      lastFocusedAgentStatusRef.current = { agentId: currentAgentId, status: currentStatus };
-      lastFocusedApprovalCountRef.current = focusedPendingExecApprovals.length;
-      return;
-    }
-
-    if (previous.status === "running" && currentStatus && currentStatus !== "running") {
-      new Notification(`${focusedAgent?.name ?? "Agent"} finished`, {
-        body: "Run completed. Open Studio to review the latest reply.",
-        tag: `agent-finished:${currentAgentId ?? "unknown"}`,
-      });
-    }
-
-    if (focusedPendingExecApprovals.length > lastFocusedApprovalCountRef.current) {
-      new Notification(`${focusedAgent?.name ?? "Agent"} needs approval`, {
+    for (const intent of intents) {
+      if (intent.kind === "notify-run-finished") {
+        new Notification(`${intent.agentName} finished`, {
+          body: "Run completed. Open Studio to review the latest reply.",
+          tag: `agent-finished:${intent.agentId}`,
+        });
+        continue;
+      }
+      new Notification(`${intent.agentName} needs approval`, {
         body: "An execution approval request is waiting in chat.",
-        tag: `agent-approval:${currentAgentId ?? "unknown"}`,
+        tag: `agent-approval:${intent.agentId}`,
       });
     }
-
-    lastFocusedAgentStatusRef.current = { agentId: currentAgentId, status: currentStatus };
-    lastFocusedApprovalCountRef.current = focusedPendingExecApprovals.length;
-  }, [focusedAgent, focusedPendingExecApprovals.length]);
+  }, [focusedAgent, focusedPendingExecApprovals.length, inTabNotificationsEnabled]);
 
   const suggestedCreateAgentName = useMemo(() => {
     try {
