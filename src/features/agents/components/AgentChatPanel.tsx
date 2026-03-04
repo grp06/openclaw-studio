@@ -222,14 +222,16 @@ const ToolCallDetails = memo(function ToolCallDetails({
   if (inlineOnly) {
     return (
       <div className={resolvedClassName}>
-        <div className="font-mono text-[10px] font-semibold tracking-[0.11em]">{summaryText}</div>
+        <div className="min-w-0 break-all font-mono text-[10px] font-semibold tracking-[0.11em]">
+          {summaryText}
+        </div>
       </div>
     );
   }
   return (
     <details open={open} className={resolvedClassName}>
       <summary
-        className="cursor-pointer select-none font-mono text-[10px] font-semibold tracking-[0.11em]"
+        className="min-w-0 break-all cursor-pointer select-none font-mono text-[10px] font-semibold tracking-[0.11em]"
         onClick={(event) => {
           event.preventDefault();
           setOpen((current) => !current);
@@ -461,7 +463,7 @@ const AssistantMessageCard = memo(function AssistantMessageCard({
                   (() => {
                     if (!contentText.includes("MEDIA:")) {
                       return (
-                        <div className="whitespace-pre-wrap break-words text-foreground">
+                        <div className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-foreground">
                           {contentText}
                         </div>
                       );
@@ -469,7 +471,7 @@ const AssistantMessageCard = memo(function AssistantMessageCard({
                     const rewritten = rewriteMediaLinesToMarkdown(contentText);
                     if (!rewritten.includes("![](")) {
                       return (
-                        <div className="whitespace-pre-wrap break-words text-foreground">
+                        <div className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-foreground">
                           {contentText}
                         </div>
                       );
