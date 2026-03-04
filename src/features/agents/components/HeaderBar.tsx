@@ -74,7 +74,7 @@ export const HeaderBar = ({
         <p className="truncate text-sm font-semibold tracking-[0.01em] text-foreground">
           OpenClaw Studio
         </p>
-        <div className="flex items-center justify-end gap-1">
+        <div className="flex min-w-0 items-center justify-end gap-1">
           {status === "connecting" ? (
             <span
               className={`ui-chip px-2 py-0.5 font-mono text-[9px] font-semibold tracking-[0.08em] ${resolveGatewayStatusBadgeClass("connecting")}`}
@@ -84,30 +84,33 @@ export const HeaderBar = ({
               Connecting
             </span>
           ) : null}
-          {notificationsAvailable ? (
-            <button
-              type="button"
-              className="ui-btn-icon ui-btn-icon-xs"
-              onClick={() => {
-                void handleNotificationsClick();
-              }}
-              aria-label={
-                notificationPermission === "granted"
+          <button
+            type="button"
+            className="ui-btn-icon ui-btn-icon-xs"
+            onClick={() => {
+              void handleNotificationsClick();
+            }}
+            aria-label={
+              !notificationsAvailable
+                ? "Notifications unavailable on this page"
+                : notificationPermission === "granted"
                   ? "Send test notification"
                   : "Enable notifications"
-              }
-              title={
-                notificationPermission === "granted"
+            }
+            title={
+              !notificationsAvailable
+                ? "Notifications unavailable (use HTTPS or localhost)"
+                : notificationPermission === "granted"
                   ? "Send test notification"
                   : notificationPermission === "denied"
                     ? "Notifications are blocked in browser settings"
                     : "Enable notifications"
-              }
-              data-testid="notifications-toggle"
-            >
-              <Bell className="h-3.5 w-3.5" />
-            </button>
-          ) : null}
+            }
+            data-testid="notifications-toggle"
+            aria-disabled={!notificationsAvailable}
+          >
+            <Bell className={`h-3.5 w-3.5 ${!notificationsAvailable ? "opacity-50" : ""}`} />
+          </button>
           <ThemeToggle />
           {showConnectionSettings ? (
             <div className="relative z-[210]" ref={menuRef}>
