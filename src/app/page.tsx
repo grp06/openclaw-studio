@@ -280,6 +280,12 @@ const AgentStudioPage = () => {
     }) => Promise<void>
   >((input) => Promise.reject(new Error(`Config mutation queue not ready for "${input.kind}".`)));
   const approvalPausedRunIdByAgentRef = useRef<Map<string, string>>(new Map());
+  const notificationsPrimedRef = useRef(false);
+  const lastFocusedAgentStatusRef = useRef<{ agentId: string | null; status: string | null }>({
+    agentId: null,
+    status: null,
+  });
+  const lastFocusedApprovalCountRef = useRef(0);
 
   const agents = state.agents;
   const selectedAgent = useMemo(() => getSelectedAgent(state), [state]);
@@ -389,6 +395,49 @@ const AgentStudioPage = () => {
       unscopedApprovals: unscopedPendingExecApprovals,
     });
   }, [focusedAgentId, pendingExecApprovalsByAgentId, unscopedPendingExecApprovals]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (notificationsPrimedRef.current) return;
+    if (status !== "connected") return;
+    notificationsPrimedRef.current = true;
+    if (Notification.permission === "default") {
+      void Notification.requestPermission();
+    }
+  }, [status]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (Notification.permission !== "granted") return;
+
+    const previous = lastFocusedAgentStatusRef.current;
+    const currentAgentId = focusedAgent?.agentId ?? null;
+    const currentStatus = focusedAgent?.status ?? null;
+
+    if (previous.agentId !== currentAgentId) {
+      lastFocusedAgentStatusRef.current = { agentId: currentAgentId, status: currentStatus };
+      lastFocusedApprovalCountRef.current = focusedPendingExecApprovals.length;
+      return;
+    }
+
+    if (previous.status === "running" && currentStatus && currentStatus !== "running") {
+      new Notification(`${focusedAgent?.name ?? "Agent"} finished`, {
+        body: "Run completed. Open Studio to review the latest reply.",
+        tag: `agent-finished:${currentAgentId ?? "unknown"}`,
+      });
+    }
+
+    if (focusedPendingExecApprovals.length > lastFocusedApprovalCountRef.current) {
+      new Notification(`${focusedAgent?.name ?? "Agent"} needs approval`, {
+        body: "An execution approval request is waiting in chat.",
+        tag: `agent-approval:${currentAgentId ?? "unknown"}`,
+      });
+    }
+
+    lastFocusedAgentStatusRef.current = { agentId: currentAgentId, status: currentStatus };
+    lastFocusedApprovalCountRef.current = focusedPendingExecApprovals.length;
+  }, [focusedAgent, focusedPendingExecApprovals.length]);
+
   const suggestedCreateAgentName = useMemo(() => {
     try {
       return resolveNextNewAgentName(state.agents);
