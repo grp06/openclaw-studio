@@ -7,7 +7,6 @@ import {
   useState,
   type ChangeEvent,
   type KeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
   type ReactNode,
 } from "react";
@@ -1159,7 +1158,6 @@ export const AgentChatPanel = ({
   });
   const pendingResizeFrameRef = useRef<number | null>(null);
   const voiceProviderPrimedByAgentRef = useRef<Record<string, boolean>>({});
-  const suppressTranscriptOpenUntilRef = useRef(0);
 
   const resizeDraft = useCallback(() => {
     const el = draftRef.current;
@@ -1341,18 +1339,7 @@ export const AgentChatPanel = ({
     [agent.agentId, canSend, onSend]
   );
 
-  const handleTranscriptOpen = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
-    if (typeof window !== "undefined" && window.innerWidth >= 1280) return;
-    if (Date.now() < suppressTranscriptOpenUntilRef.current) return;
-    const target = event.target as HTMLElement | null;
-    if (target?.closest("button, a, input, textarea, summary, details")) return;
-    setTranscriptModalOpen(true);
-  }, []);
-
-  const handleTranscriptModalClose = useCallback((event?: ReactMouseEvent<HTMLButtonElement>) => {
-    event?.preventDefault();
-    event?.stopPropagation();
-    suppressTranscriptOpenUntilRef.current = Date.now() + 450;
+  const handleTranscriptModalClose = useCallback(() => {
     setTranscriptModalOpen(false);
   }, []);
 
@@ -1537,7 +1524,7 @@ export const AgentChatPanel = ({
 
           <div className="mt-0.5 flex w-full items-center justify-end gap-2 sm:w-auto">
             <button
-              className="nodrag ui-btn-icon xl:hidden"
+              className="nodrag ui-btn-icon lg:hidden"
               type="button"
               aria-label="Expand transcript"
               title="Expand transcript"
@@ -1573,7 +1560,7 @@ export const AgentChatPanel = ({
       </div>
 
       <div className="mt-3 flex min-h-0 flex-1 flex-col px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4 sm:pb-4">
-        <div className="relative min-h-0 flex-1 overflow-hidden" onClickCapture={handleTranscriptOpen}>
+        <div className="relative min-h-0 flex-1 overflow-hidden">
           <AgentChatTranscript
             agentId={agent.agentId}
             name={agent.name}
