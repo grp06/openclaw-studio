@@ -1524,7 +1524,7 @@ export const AgentChatPanel = ({
 
           <div className="mt-0.5 flex w-full items-center justify-end gap-2 sm:w-auto">
             <button
-              className="nodrag ui-btn-icon md:hidden"
+              className="nodrag ui-btn-icon !inline-flex md:!hidden"
               type="button"
               aria-label="Expand transcript"
               title="Expand transcript"
