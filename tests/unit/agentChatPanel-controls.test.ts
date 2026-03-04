@@ -178,7 +178,7 @@ describe("AgentChatPanel controls", () => {
     expect(onNewSession).toHaveBeenCalledTimes(1);
   });
 
-  it("opens read-only transcript modal from expand icon", () => {
+  it("opens read-only transcript modal from expand icon", async () => {
     render(
       createElement(AgentChatPanel, {
         agent: {
@@ -203,7 +203,9 @@ describe("AgentChatPanel controls", () => {
     fireEvent.click(screen.getByLabelText("Expand transcript"));
     expect(screen.getByText(/Agent One · Transcript/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Close/i }));
-    expect(screen.queryByText(/Agent One · Transcript/i)).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText(/Agent One · Transcript/i)).not.toBeInTheDocument();
+    });
   });
 
   it("does_not_render_inline_status_badge_markers", () => {

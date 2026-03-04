@@ -985,6 +985,8 @@ textarea:focus::-webkit-scrollbar {
   border: 1px solid color-mix(in oklch, var(--border) 72%, transparent);
   border-radius: var(--radius-card);
   background: var(--chat-surface-bg);
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .dark .ui-chat-scroll {

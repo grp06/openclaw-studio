@@ -635,7 +635,7 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
 
   const scrollChatToBottom = useCallback(() => {
     if (!chatRef.current) return;
-    if (chatBottomRef.current) {
+    if (chatBottomRef.current && typeof chatBottomRef.current.scrollIntoView === "function") {
       chatBottomRef.current.scrollIntoView({ block: "end" });
       return;
     }
@@ -1159,6 +1159,7 @@ export const AgentChatPanel = ({
   });
   const pendingResizeFrameRef = useRef<number | null>(null);
   const voiceProviderPrimedByAgentRef = useRef<Record<string, boolean>>({});
+  const suppressTranscriptOpenUntilRef = useRef(0);
 
   const resizeDraft = useCallback(() => {
     const el = draftRef.current;
@@ -1342,9 +1343,17 @@ export const AgentChatPanel = ({
 
   const handleTranscriptOpen = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (typeof window !== "undefined" && window.innerWidth >= 1280) return;
+    if (Date.now() < suppressTranscriptOpenUntilRef.current) return;
     const target = event.target as HTMLElement | null;
     if (target?.closest("button, a, input, textarea, summary, details")) return;
     setTranscriptModalOpen(true);
+  }, []);
+
+  const handleTranscriptModalClose = useCallback((event?: ReactMouseEvent<HTMLButtonElement>) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    suppressTranscriptOpenUntilRef.current = Date.now() + 450;
+    setTranscriptModalOpen(false);
   }, []);
 
   const beginRename = useCallback(() => {
@@ -1631,7 +1640,7 @@ export const AgentChatPanel = ({
             <button
               type="button"
               className="ui-btn-secondary px-3 py-1.5 text-xs"
-              onClick={() => setTranscriptModalOpen(false)}
+              onClick={handleTranscriptModalClose}
             >
               Close
             </button>
