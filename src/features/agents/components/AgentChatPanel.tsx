@@ -732,7 +732,7 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
   }, [runStartedAt, showLiveAssistantCard, status]);
 
   return (
-    <div className="relative flex-1 overflow-hidden">
+    <div className="relative min-h-0 flex-1 overflow-hidden">
       <div
         ref={chatRef}
         data-testid="agent-chat-scroll"
@@ -1573,7 +1573,7 @@ export const AgentChatPanel = ({
       </div>
 
       <div className="mt-3 flex min-h-0 flex-1 flex-col px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4 sm:pb-4">
-        <div className="min-h-0 flex-1" onClickCapture={handleTranscriptOpen}>
+        <div className="relative min-h-0 flex-1 overflow-hidden" onClickCapture={handleTranscriptOpen}>
           <AgentChatTranscript
             agentId={agent.agentId}
             name={agent.name}
@@ -1599,7 +1599,7 @@ export const AgentChatPanel = ({
           />
         </div>
 
-        <div className="mt-3">
+        <div className="relative z-20 mt-3">
           <AgentChatComposer
             value={draftValue}
             inputRef={handleDraftRef}
