@@ -754,7 +754,7 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
               </div>
               <button
                 type="button"
-                className="w-full shrink-0 rounded-md border border-border/70 bg-surface-3 px-3 py-1.5 font-mono text-[12px] font-medium tracking-[0.02em] text-foreground transition hover:bg-surface-2 sm:w-auto"
+                className="inline-flex w-fit self-start rounded-md border border-border/70 bg-surface-3 px-3 py-1.5 font-mono text-[12px] font-medium tracking-[0.02em] text-foreground transition hover:bg-surface-2 sm:self-auto"
                 onClick={onLoadMoreHistory}
               >
                 Load more
