@@ -95,7 +95,7 @@ describe("historyLifecycleWorkflow", () => {
     ).toEqual({
       kind: "fetch",
       sessionKey: "agent:agent-1:main",
-      limit: 5000,
+      limit: 1000,
       requestRevision: 14,
       requestEpoch: 0,
       requestId: "req-42",

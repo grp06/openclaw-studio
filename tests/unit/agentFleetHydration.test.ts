@@ -12,7 +12,7 @@ describe("hydrateAgentFleetFromGateway", () => {
       gateway: null,
       focused: {},
       avatars: {
-        [gatewayUrl]: {
+        "ws://localhost:18789": {
           "agent-1": "persisted-seed",
         },
       },
@@ -61,16 +61,38 @@ describe("hydrateAgentFleetFromGateway", () => {
         };
       }
       if (method === "sessions.list") {
-        const { agentId, search } = params as Record<string, unknown>;
+        const query = params as Record<string, unknown>;
+        expect(query.includeGlobal).toBe(false);
+        expect(query.includeUnknown).toBe(false);
+        expect(query.search).toBe(":main");
+        expect("limit" in query).toBe(false);
+        expect("includeDerivedTitles" in query).toBe(false);
+        expect("includeLastMessage" in query).toBe(false);
         return {
           sessions: [
             {
-              key: search,
+              key: "agent:agent-2:main",
               updatedAt: 1,
               displayName: "Main",
               thinkingLevel: "medium",
               modelProvider: "openai",
-              model: agentId === "agent-2" ? "gpt-5" : "gpt-4.1",
+              model: "gpt-5",
+            },
+            {
+              key: "agent:agent-1:main",
+              updatedAt: 1,
+              displayName: "Main",
+              thinkingLevel: "medium",
+              modelProvider: "openai",
+              model: "gpt-4.1",
+            },
+            {
+              key: "agent:agent-3:work",
+              updatedAt: 1,
+              displayName: "Noise",
+              thinkingLevel: "low",
+              modelProvider: "openai",
+              model: "gpt-4.1",
             },
           ],
         };
@@ -117,6 +139,8 @@ describe("hydrateAgentFleetFromGateway", () => {
 
     expect(call).toHaveBeenCalledWith("agents.list", {});
     expect(call).toHaveBeenCalledWith("exec.approvals.get", {});
+    expect(call).toHaveBeenCalledTimes(6);
+    expect(call.mock.calls.filter(([method]) => method === "sessions.list")).toHaveLength(1);
     expect(result.seeds).toHaveLength(2);
     expect(result.seeds[0]).toEqual(
       expect.objectContaining({
@@ -144,5 +168,167 @@ describe("hydrateAgentFleetFromGateway", () => {
     expect(result.sessionSettingsSyncedAgentIds).toEqual([]);
     expect(result.suggestedSelectedAgentId).toBe("agent-2");
     expect(result.summaryPatches.length).toBeGreaterThan(0);
+  });
+
+  it("hydrates many agents with one sessions.list call", async () => {
+    const agentCount = 25;
+    const agents = Array.from({ length: agentCount }, (_, index) => ({
+      id: `agent-${index + 1}`,
+      name: `Agent ${index + 1}`,
+      identity: { avatarUrl: `https://example.com/${index + 1}.png` },
+    }));
+    const sessions = agents.map((agent) => ({
+      key: `agent:${agent.id}:main`,
+      updatedAt: 1,
+      displayName: `${agent.name} Main`,
+      thinkingLevel: "medium",
+      modelProvider: "openai",
+      model: "gpt-5",
+    }));
+    const call = vi.fn(async (method: string, params: unknown) => {
+      if (method === "agents.list") {
+        return {
+          defaultId: "agent-1",
+          mainKey: "main",
+          agents,
+        };
+      }
+      if (method === "sessions.list") {
+        const query = params as Record<string, unknown>;
+        expect(query).toEqual({
+          includeGlobal: false,
+          includeUnknown: false,
+          search: ":main",
+        });
+        return { sessions };
+      }
+      if (method === "exec.approvals.get") {
+        return { file: { agents: {} } };
+      }
+      if (method === "status") {
+        return {
+          sessions: {
+            recent: [],
+            byAgent: [],
+          },
+        };
+      }
+      if (method === "sessions.preview") {
+        return {
+          ts: 1,
+          previews: sessions.map((entry) => ({
+            key: entry.key,
+            status: "ok",
+            items: [{ role: "assistant", text: "ok", timestamp: "2026-03-01T00:00:00Z" }],
+          })),
+        };
+      }
+      if (method === "config.get") {
+        return {
+          hash: "hash-many",
+          config: { agents: { defaults: { model: "openai/gpt-5" }, list: [] } },
+        };
+      }
+      throw new Error(`Unhandled method: ${method}`);
+    });
+
+    const result = await hydrateAgentFleetFromGateway({
+      client: { call },
+      gatewayUrl: "ws://127.0.0.1:18789",
+      cachedConfigSnapshot: null,
+      loadStudioSettings: async () => ({ version: 1, gateway: null, focused: {}, avatars: {} }),
+      isDisconnectLikeError: () => false,
+    });
+
+    expect(call.mock.calls.filter(([method]) => method === "sessions.list")).toHaveLength(1);
+    expect(result.seeds).toHaveLength(agentCount);
+    expect(result.sessionCreatedAgentIds).toHaveLength(agentCount);
+    expect(result.sessionSettingsSyncedAgentIds).toHaveLength(agentCount);
+  });
+
+  it("returns safely when batched sessions.list fails", async () => {
+    const call = vi.fn(async (method: string) => {
+      if (method === "agents.list") {
+        return {
+          defaultId: "agent-1",
+          mainKey: "main",
+          agents: [
+            { id: "agent-1", name: "One" },
+            { id: "agent-2", name: "Two" },
+          ],
+        };
+      }
+      if (method === "sessions.list") {
+        throw new Error("sessions list failed");
+      }
+      if (method === "exec.approvals.get") {
+        return { file: { agents: {} } };
+      }
+      if (method === "config.get") {
+        return {
+          hash: "hash-failure",
+          config: { agents: { defaults: { model: "openai/gpt-5" }, list: [] } },
+        };
+      }
+      throw new Error(`Unhandled method: ${method}`);
+    });
+    const logError = vi.fn();
+
+    const result = await hydrateAgentFleetFromGateway({
+      client: { call },
+      gatewayUrl: "ws://127.0.0.1:18789",
+      cachedConfigSnapshot: null,
+      loadStudioSettings: async () => ({ version: 1, gateway: null, focused: {}, avatars: {} }),
+      isDisconnectLikeError: () => false,
+      logError,
+    });
+
+    expect(call.mock.calls.filter(([method]) => method === "sessions.list")).toHaveLength(1);
+    expect(logError).toHaveBeenCalledWith(
+      "Failed to list sessions while resolving fleet sessions.",
+      expect.any(Error)
+    );
+    expect(result.sessionCreatedAgentIds).toEqual([]);
+    expect(result.sessionSettingsSyncedAgentIds).toEqual([]);
+    expect(result.summaryPatches).toEqual([]);
+    expect(result.suggestedSelectedAgentId).toBeNull();
+    expect(result.seeds).toHaveLength(2);
+  });
+
+  it("skips sessions.list when no agents are returned", async () => {
+    const call = vi.fn(async (method: string) => {
+      if (method === "agents.list") {
+        return {
+          defaultId: "main",
+          mainKey: "main",
+          agents: [],
+        };
+      }
+      if (method === "exec.approvals.get") {
+        return { file: { agents: {} } };
+      }
+      if (method === "config.get") {
+        return {
+          hash: "hash-empty",
+          config: { agents: { defaults: { model: "openai/gpt-5" }, list: [] } },
+        };
+      }
+      throw new Error(`Unhandled method: ${method}`);
+    });
+
+    const result = await hydrateAgentFleetFromGateway({
+      client: { call },
+      gatewayUrl: "ws://127.0.0.1:18789",
+      cachedConfigSnapshot: null,
+      loadStudioSettings: async () => ({ version: 1, gateway: null, focused: {}, avatars: {} }),
+      isDisconnectLikeError: () => false,
+    });
+
+    expect(call.mock.calls.filter(([method]) => method === "sessions.list")).toHaveLength(0);
+    expect(result.seeds).toEqual([]);
+    expect(result.sessionCreatedAgentIds).toEqual([]);
+    expect(result.sessionSettingsSyncedAgentIds).toEqual([]);
+    expect(result.summaryPatches).toEqual([]);
+    expect(result.suggestedSelectedAgentId).toBeNull();
   });
 });

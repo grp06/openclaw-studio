@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   RUNTIME_SYNC_FOCUSED_HISTORY_INTERVAL_MS,
+  RUNTIME_SYNC_MAX_HISTORY_LIMIT,
   RUNTIME_SYNC_RECONCILE_INTERVAL_MS,
   resolveRuntimeSyncBootstrapHistoryAgentIds,
   resolveRuntimeSyncFocusedHistoryPollingIntent,
@@ -118,7 +119,7 @@ describe("runtimeSyncControlWorkflow", () => {
       resolveRuntimeSyncLoadMoreHistoryLimit({
         currentLimit: 200,
         defaultLimit: 200,
-        maxLimit: 5000,
+        maxLimit: RUNTIME_SYNC_MAX_HISTORY_LIMIT,
       })
     ).toBe(400);
 
@@ -126,17 +127,25 @@ describe("runtimeSyncControlWorkflow", () => {
       resolveRuntimeSyncLoadMoreHistoryLimit({
         currentLimit: 3000,
         defaultLimit: 200,
-        maxLimit: 5000,
+        maxLimit: RUNTIME_SYNC_MAX_HISTORY_LIMIT,
       })
-    ).toBe(5000);
+    ).toBe(1000);
+
+    expect(
+      resolveRuntimeSyncLoadMoreHistoryLimit({
+        currentLimit: 20,
+        defaultLimit: 50,
+        maxLimit: RUNTIME_SYNC_MAX_HISTORY_LIMIT,
+      })
+    ).toBe(100);
 
     expect(
       resolveRuntimeSyncLoadMoreHistoryLimit({
         currentLimit: null,
-        defaultLimit: 200,
-        maxLimit: 5000,
+        defaultLimit: 50,
+        maxLimit: RUNTIME_SYNC_MAX_HISTORY_LIMIT,
       })
-    ).toBe(400);
+    ).toBe(100);
   });
 
   it("always plans summary refresh plus reconcile for gap recovery", () => {

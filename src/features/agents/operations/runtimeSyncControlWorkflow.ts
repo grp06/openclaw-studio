@@ -1,13 +1,14 @@
 import type { AgentState } from "@/features/agents/state/store";
+import { GATEWAY_CHAT_HISTORY_MAX_LIMIT } from "@/lib/gateway/chatHistoryLimits";
 
 type RuntimeSyncStatus = "disconnected" | "connecting" | "connected";
 
 export const RUNTIME_SYNC_RECONCILE_INTERVAL_MS = 3000;
 export const RUNTIME_SYNC_FOCUSED_HISTORY_INTERVAL_MS = 4500;
-export const RUNTIME_SYNC_DEFAULT_HISTORY_LIMIT = 200;
-export const RUNTIME_SYNC_MAX_HISTORY_LIMIT = 5000;
+export const RUNTIME_SYNC_DEFAULT_HISTORY_LIMIT = 50;
+export const RUNTIME_SYNC_MAX_HISTORY_LIMIT = GATEWAY_CHAT_HISTORY_MAX_LIMIT;
 
-const RUNTIME_SYNC_MIN_LOAD_MORE_HISTORY_LIMIT = 400;
+const RUNTIME_SYNC_MIN_LOAD_MORE_HISTORY_LIMIT = 100;
 
 type RuntimeSyncHistoryBootstrapAgent = Pick<
   AgentState,

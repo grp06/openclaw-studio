@@ -7,6 +7,7 @@ import type {
   CronRunResult,
 } from "@/lib/cron/types";
 import type { SkillStatusReport } from "@/lib/skills/types";
+import { clampGatewayChatHistoryLimit } from "@/lib/gateway/chatHistoryLimits";
 
 type Envelope<T> = {
   ok?: boolean;
@@ -208,8 +209,9 @@ export const loadDomainChatHistory = async (params: {
   limit?: number;
 }): Promise<ChatHistoryResult> => {
   const query = new URLSearchParams({ sessionKey: params.sessionKey.trim() });
-  if (typeof params.limit === "number" && Number.isFinite(params.limit) && params.limit > 0) {
-    query.set("limit", String(Math.floor(params.limit)));
+  const boundedLimit = clampGatewayChatHistoryLimit(params.limit);
+  if (typeof boundedLimit === "number") {
+    query.set("limit", String(boundedLimit));
   }
   const result = await fetchJson<Envelope<ChatHistoryResult>>(
     `/api/runtime/chat-history?${query.toString()}`,

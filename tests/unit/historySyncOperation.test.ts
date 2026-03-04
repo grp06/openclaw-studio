@@ -73,6 +73,45 @@ describe("historySyncOperation", () => {
     expect(commands).toEqual([{ kind: "noop", reason: "missing-agent" }]);
   });
 
+  it("caps chat.history request limits at gateway maximum", async () => {
+    const agent = createAgent({
+      transcriptRevision: 1,
+      outputLines: ["> local question"],
+    });
+    const gatewayCalls: Array<{ method: string; params: unknown }> = [];
+
+    await runHistorySyncOperation({
+      client: {
+        call: async <T>(method: string, params: unknown) => {
+          gatewayCalls.push({ method, params });
+          return {
+            sessionKey: agent.sessionKey,
+            messages: [],
+          } as T;
+        },
+      },
+      agentId: "agent-1",
+      requestedLimit: 9_000,
+      getAgent: () => agent,
+      inFlightSessionKeys: new Set<string>(),
+      requestId: "req-cap-1",
+      loadedAt: 1_999,
+      defaultLimit: 200,
+      maxLimit: 5_000,
+      transcriptV2Enabled: true,
+    });
+
+    expect(gatewayCalls).toEqual([
+      {
+        method: "chat.history",
+        params: {
+          sessionKey: "agent:agent-1:main",
+          limit: 1000,
+        },
+      },
+    ]);
+  });
+
   it("applies history updates even when latest agent is running with active run", async () => {
     const agent = createAgent({
       status: "running",

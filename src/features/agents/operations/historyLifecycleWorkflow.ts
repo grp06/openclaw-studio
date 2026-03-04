@@ -1,4 +1,5 @@
 import type { AgentState } from "@/features/agents/state/store";
+import { GATEWAY_CHAT_HISTORY_MAX_LIMIT } from "@/lib/gateway/chatHistoryLimits";
 
 type HistoryRequestIntent =
   | {
@@ -32,11 +33,12 @@ const resolveHistoryFetchLimit = (params: {
   defaultLimit: number;
   maxLimit: number;
 }): number => {
+  const effectiveMax = Math.max(1, Math.min(params.maxLimit, GATEWAY_CHAT_HISTORY_MAX_LIMIT));
   const requested = params.requestedLimit;
   if (typeof requested !== "number" || !Number.isFinite(requested) || requested <= 0) {
-    return params.defaultLimit;
+    return Math.min(effectiveMax, Math.max(1, Math.floor(params.defaultLimit)));
   }
-  return Math.min(params.maxLimit, Math.floor(requested));
+  return Math.min(effectiveMax, Math.floor(requested));
 };
 
 export const resolveHistoryRequestIntent = (params: {

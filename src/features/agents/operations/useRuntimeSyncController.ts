@@ -20,17 +20,16 @@ import {
   shouldRuntimeSyncContinueFocusedHistoryPolling,
 } from "@/features/agents/operations/runtimeSyncControlWorkflow";
 import {
-  buildDomainHistoryRunStatePatch,
-  type DomainHistoryActiveRun,
   buildSummarySnapshotPatches,
   type SummaryPreviewSnapshot,
   type SummaryStatusSnapshot,
 } from "@/features/agents/state/runtimeEventBridge";
 import type { AgentState } from "@/features/agents/state/store";
 import { TRANSCRIPT_V2_ENABLED, logTranscriptDebugMetric } from "@/features/agents/state/transcript";
-import type { ControlPlaneOutboxEntry } from "@/lib/controlplane/contracts";
-import { randomUUID } from "@/lib/uuid";
+import { loadDomainChatHistory } from "@/lib/controlplane/domain-runtime-client";
+import { GATEWAY_CHAT_HISTORY_MAX_LIMIT } from "@/lib/gateway/chatHistoryLimits";
 import { fetchJson } from "@/lib/http";
+import { randomUUID } from "@/lib/uuid";
 
 type RuntimeSyncDispatchAction = {
   type: "updateAgent";
@@ -65,53 +64,6 @@ type RuntimeSyncController = {
   clearHistoryInFlight: (sessionKey: string) => void;
 };
 
-type DomainAgentHistoryResponse = {
-  entries?: unknown[];
-  hasMore?: unknown;
-  semanticTurnsIncluded?: unknown;
-  windowTruncated?: unknown;
-  activeRun?: unknown;
-};
-
-const DOMAIN_SEMANTIC_TURN_LIMIT = 50;
-const DOMAIN_SEMANTIC_SCAN_LIMIT = 800;
-const DOMAIN_CHAT_HISTORY_MAX_LIMIT = 1000;
-
-type DomainChatHistoryEnvelope = {
-  ok?: unknown;
-  payload?: {
-    sessionKey?: unknown;
-    messages?: unknown;
-  } | null;
-  error?: unknown;
-};
-
-type DomainChatHistoryPayload = {
-  sessionKey: string;
-  messages: Record<string, unknown>[];
-};
-
-const asRecord = (value: unknown): Record<string, unknown> | null =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-
-const resolveDomainHistoryActiveRun = (value: unknown): DomainHistoryActiveRun | null => {
-  const record = asRecord(value);
-  if (!record) return null;
-  const statusRaw = record.status;
-  const status =
-    statusRaw === "running" || statusRaw === "idle" || statusRaw === "error"
-      ? statusRaw
-      : null;
-  if (!status) return null;
-  const runIdRaw = record.runId;
-  const runId =
-    typeof runIdRaw === "string" ? (runIdRaw.trim() || null) : runIdRaw === null ? null : null;
-  const complete = record.complete === true;
-  return { runId, status, complete };
-};
-
 export function useRuntimeSyncController(
   params: UseRuntimeSyncControllerParams
 ): RuntimeSyncController {
@@ -132,42 +84,6 @@ export function useRuntimeSyncController(
 
   const defaultHistoryLimit = params.defaultHistoryLimit ?? RUNTIME_SYNC_DEFAULT_HISTORY_LIMIT;
   const maxHistoryLimit = params.maxHistoryLimit ?? RUNTIME_SYNC_MAX_HISTORY_LIMIT;
-
-  const loadDomainChatHistory = useCallback(
-    async (params: { sessionKey: string; limit?: number }): Promise<DomainChatHistoryPayload> => {
-      const query = new URLSearchParams({ sessionKey: params.sessionKey.trim() });
-      if (typeof params.limit === "number" && Number.isFinite(params.limit) && params.limit > 0) {
-        const bounded = Math.min(Math.floor(params.limit), DOMAIN_CHAT_HISTORY_MAX_LIMIT);
-        query.set("limit", String(bounded));
-      }
-      const response = await fetchJson<DomainChatHistoryEnvelope>(
-        `/api/runtime/chat-history?${query.toString()}`,
-        { cache: "no-store" }
-      );
-      if (response?.ok !== true) {
-        const message =
-          typeof response?.error === "string" ? response.error.trim() : "Domain chat history read failed.";
-        throw new Error(message || "Domain chat history read failed.");
-      }
-      const payload =
-        response.payload && typeof response.payload === "object"
-          ? response.payload
-          : {};
-      const messages = Array.isArray(payload.messages)
-        ? payload.messages.filter(
-            (entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object")
-          )
-        : [];
-      return {
-        sessionKey:
-          typeof payload.sessionKey === "string" && payload.sessionKey.trim()
-            ? payload.sessionKey.trim()
-            : params.sessionKey.trim(),
-        messages,
-      };
-    },
-    []
-  );
 
   useEffect(() => {
     agentsRef.current = agents;
@@ -226,153 +142,54 @@ export function useRuntimeSyncController(
     }
   }, [client, dispatch, isDisconnectLikeError, useDomainApiReads]);
 
-  const loadAgentHistoryViaDomainApi = useCallback(
-    async (agentId: string, limit: number) => {
-      const normalizedAgentId = agentId.trim();
-      const encodedAgentId = encodeURIComponent(normalizedAgentId);
-      if (!encodedAgentId) return;
-      const boundedLimit = Math.min(Math.max(1, Math.floor(limit)), DOMAIN_CHAT_HISTORY_MAX_LIMIT);
-      const fetchPage = async (params: {
-        turnLimit?: number;
-        scanLimit?: number;
-      }): Promise<{
-        entries: ControlPlaneOutboxEntry[];
-        semanticTurnsIncluded: number | null;
-        windowTruncated: boolean;
-        activeRun: DomainHistoryActiveRun | null;
-      }> => {
-        const query = new URLSearchParams();
-        query.set("limit", String(boundedLimit));
-        query.set("view", "semantic");
-        query.set("turnLimit", String(params.turnLimit ?? DOMAIN_SEMANTIC_TURN_LIMIT));
-        query.set("scanLimit", String(params.scanLimit ?? DOMAIN_SEMANTIC_SCAN_LIMIT));
-        const result = await fetchJson<DomainAgentHistoryResponse>(
-          `/api/runtime/agents/${encodedAgentId}/history?${query.toString()}`,
-          { cache: "no-store" }
-        );
-        const entries = Array.isArray(result.entries)
-          ? (result.entries as ControlPlaneOutboxEntry[])
-          : [];
-        const semanticTurnsIncluded =
-          typeof result.semanticTurnsIncluded === "number" &&
-          Number.isFinite(result.semanticTurnsIncluded) &&
-          result.semanticTurnsIncluded >= 0
-            ? Math.floor(result.semanticTurnsIncluded)
-            : null;
-        const windowTruncated =
-          result.windowTruncated === true ? true : result.hasMore === true;
-        const activeRun = resolveDomainHistoryActiveRun(result.activeRun);
-        return {
-          entries,
-          semanticTurnsIncluded,
-          windowTruncated,
-          activeRun,
-        };
-      };
-
-      const loadedAt = Date.now();
-      const firstPage = await fetchPage({
-        turnLimit: DOMAIN_SEMANTIC_TURN_LIMIT,
-        scanLimit: DOMAIN_SEMANTIC_SCAN_LIMIT,
-      });
-      logTranscriptDebugMetric("domain_history_semantic_window", {
-        agentId: normalizedAgentId,
-        turns: firstPage.semanticTurnsIncluded,
-        entries: firstPage.entries.length,
-        truncated: firstPage.windowTruncated,
-      });
-      const latestAgent =
-        agentsRef.current.find((entry) => entry.agentId === normalizedAgentId) ?? null;
-      if (
-        latestAgent?.sessionCreated &&
-        typeof latestAgent.sessionKey === "string" &&
-        latestAgent.sessionKey.trim()
-      ) {
-        const commands = await runHistorySyncOperation({
-          client: {
-            call: async <T = unknown>(method: string, request: unknown) => {
-              if (method !== "chat.history") {
-                throw new Error(`Unsupported domain history method: ${method}`);
-              }
-              const body =
-                request && typeof request === "object"
-                  ? (request as { sessionKey?: unknown; limit?: unknown })
-                  : {};
-              const sessionKey =
-                typeof body.sessionKey === "string" ? body.sessionKey.trim() : latestAgent.sessionKey.trim();
-              const requestedLimit =
-                typeof body.limit === "number" && Number.isFinite(body.limit) && body.limit > 0
-                  ? Math.floor(body.limit)
-                  : undefined;
-              return (await loadDomainChatHistory({
-                sessionKey,
-                limit: requestedLimit,
-              })) as T;
-            },
-          },
-          agentId: normalizedAgentId,
-          requestedLimit: boundedLimit,
-          getAgent: (targetAgentId) =>
-            agentsRef.current.find((entry) => entry.agentId === targetAgentId) ?? null,
-          inFlightSessionKeys: historyInFlightRef.current,
-          requestId: randomUUID(),
-          loadedAt,
-          defaultLimit: defaultHistoryLimit,
-          maxLimit: maxHistoryLimit,
-          transcriptV2Enabled: TRANSCRIPT_V2_ENABLED,
-          allowTranscriptRevisionSkew: true,
-        });
-        executeHistorySyncCommands({
-          commands,
-          dispatch,
-          logMetric: (metric, meta) => logTranscriptDebugMetric(metric, meta),
-          isDisconnectLikeError,
-          logError: (message, error) => console.error(message, error),
-        });
-      }
-      const domainRunStatePatch =
-        firstPage.activeRun
-          ? buildDomainHistoryRunStatePatch({
-              activeRun: firstPage.activeRun,
-              currentStatus: latestAgent?.status ?? "idle",
-              currentRunId: latestAgent?.runId ?? null,
-            })
-          : null;
-      dispatch({
-        type: "updateAgent",
-        agentId,
-        patch: {
-          historyLoadedAt: loadedAt,
-          historyFetchLimit: boundedLimit,
-          historyFetchedCount:
-            typeof firstPage.semanticTurnsIncluded === "number"
-              ? firstPage.semanticTurnsIncluded
-              : firstPage.entries.length,
-          historyMaybeTruncated: firstPage.windowTruncated,
-          ...(domainRunStatePatch ?? {}),
-        },
-      });
-    },
-    [
-      defaultHistoryLimit,
-      dispatch,
-      isDisconnectLikeError,
-      loadDomainChatHistory,
-      maxHistoryLimit,
-    ]
-  );
-
   const loadAgentHistory = useCallback(
     async (agentId: string, options?: { limit?: number }) => {
       if (useDomainApiReads) {
-        const agent = agentsRef.current.find((entry) => entry.agentId === agentId) ?? null;
-        const rawLimit =
-          typeof options?.limit === "number" && Number.isFinite(options.limit)
-            ? Math.floor(options.limit)
-            : agent?.historyFetchLimit ?? defaultHistoryLimit;
-        const limit = Math.min(Math.max(1, rawLimit), maxHistoryLimit);
         try {
-          await loadAgentHistoryViaDomainApi(agentId, limit);
+          const commands = await runHistorySyncOperation({
+            client: {
+              call: async <T = unknown>(method: string, request: unknown) => {
+                if (method !== "chat.history") {
+                  throw new Error(`Unsupported domain history method: ${method}`);
+                }
+                const body =
+                  request && typeof request === "object"
+                    ? (request as { sessionKey?: unknown; limit?: unknown })
+                    : {};
+                const sessionKey =
+                  typeof body.sessionKey === "string" ? body.sessionKey.trim() : "";
+                if (!sessionKey) {
+                  throw new Error("Unsupported domain history request: missing sessionKey");
+                }
+                const requestedLimit =
+                  typeof body.limit === "number" && Number.isFinite(body.limit) && body.limit > 0
+                    ? Math.floor(body.limit)
+                    : undefined;
+                return (await loadDomainChatHistory({
+                  sessionKey,
+                  limit: requestedLimit,
+                })) as T;
+              },
+            },
+            agentId,
+            requestedLimit: options?.limit,
+            getAgent: (targetAgentId) =>
+              agentsRef.current.find((entry) => entry.agentId === targetAgentId) ?? null,
+            inFlightSessionKeys: historyInFlightRef.current,
+            requestId: randomUUID(),
+            loadedAt: Date.now(),
+            defaultLimit: defaultHistoryLimit,
+            maxLimit: Math.min(maxHistoryLimit, GATEWAY_CHAT_HISTORY_MAX_LIMIT),
+            transcriptV2Enabled: TRANSCRIPT_V2_ENABLED,
+            allowTranscriptRevisionSkew: true,
+          });
+          executeHistorySyncCommands({
+            commands,
+            dispatch,
+            logMetric: (metric, meta) => logTranscriptDebugMetric(metric, meta),
+            isDisconnectLikeError,
+            logError: (message, error) => console.error(message, error),
+          });
         } catch (error) {
           if (!isDisconnectLikeError(error)) {
             console.error("Failed to load domain runtime history.", error);
@@ -406,7 +223,6 @@ export function useRuntimeSyncController(
       defaultHistoryLimit,
       dispatch,
       isDisconnectLikeError,
-      loadAgentHistoryViaDomainApi,
       maxHistoryLimit,
       useDomainApiReads,
     ]
@@ -414,16 +230,6 @@ export function useRuntimeSyncController(
 
   const loadMoreAgentHistory = useCallback(
     (agentId: string) => {
-      if (useDomainApiReads) {
-        const agent = agentsRef.current.find((entry) => entry.agentId === agentId) ?? null;
-        const nextLimit = resolveRuntimeSyncLoadMoreHistoryLimit({
-          currentLimit: agent?.historyFetchLimit ?? null,
-          defaultLimit: defaultHistoryLimit,
-          maxLimit: maxHistoryLimit,
-        });
-        void loadAgentHistory(agentId, { limit: nextLimit });
-        return;
-      }
       const agent = agentsRef.current.find((entry) => entry.agentId === agentId) ?? null;
       const nextLimit = resolveRuntimeSyncLoadMoreHistoryLimit({
         currentLimit: agent?.historyFetchLimit ?? null,
@@ -432,7 +238,7 @@ export function useRuntimeSyncController(
       });
       void loadAgentHistory(agentId, { limit: nextLimit });
     },
-    [defaultHistoryLimit, loadAgentHistory, maxHistoryLimit, useDomainApiReads]
+    [defaultHistoryLimit, loadAgentHistory, maxHistoryLimit]
   );
 
   const reconcileRunningAgents = useCallback(async () => {

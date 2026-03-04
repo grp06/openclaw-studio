@@ -2,6 +2,7 @@ import { createElement, useEffect } from "react";
 import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { RUNTIME_SYNC_MAX_HISTORY_LIMIT } from "@/features/agents/operations/runtimeSyncControlWorkflow";
 import { useRuntimeSyncController } from "@/features/agents/operations/useRuntimeSyncController";
 import type { AgentState } from "@/features/agents/state/store";
 
@@ -278,7 +279,7 @@ describe("useRuntimeSyncController", () => {
     expect(bootstrappedAgentIds).not.toContain("agent-3");
   });
 
-  it("in domain mode bootstraps missing history only for the focused agent", async () => {
+  it("in domain mode bootstraps focused missing history through chat-history only", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/runtime/summary")) {
@@ -291,19 +292,13 @@ describe("useRuntimeSyncController", () => {
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
       }
-      if (url.includes("/api/runtime/agents/")) {
+      if (url.includes("/api/runtime/chat-history")) {
         return new Response(
           JSON.stringify({
-            enabled: true,
-            entries: [],
-            hasMore: false,
-            nextBeforeOutboxId: null,
-            semanticTurnsIncluded: 0,
-            windowTruncated: false,
-            activeRun: {
-              runId: null,
-              status: "idle",
-              complete: true,
+            ok: true,
+            payload: {
+              sessionKey: "agent:agent-2:main",
+              messages: [],
             },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
@@ -315,6 +310,14 @@ describe("useRuntimeSyncController", () => {
       });
     });
     vi.stubGlobal("fetch", fetchMock);
+
+    mockedRunHistorySyncOperation.mockImplementation(async (params) => {
+      await params.client.call("chat.history", {
+        sessionKey: "agent:agent-2:main",
+        limit: 50,
+      });
+      return [];
+    });
 
     renderController({
       status: "connected",
@@ -332,11 +335,19 @@ describe("useRuntimeSyncController", () => {
       await Promise.resolve();
     });
 
-    const historyCalls = fetchMock.mock.calls
+    expect(mockedRunHistorySyncOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "agent-2",
+      })
+    );
+    const chatHistoryCalls = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => url.includes("/api/runtime/chat-history"));
+    expect(chatHistoryCalls.some((url) => url.includes("sessionKey=agent%3Aagent-2%3Amain"))).toBe(true);
+    const semanticCalls = fetchMock.mock.calls
       .map((call) => String(call[0]))
       .filter((url) => url.includes("/api/runtime/agents/"));
-    expect(historyCalls.some((url) => url.includes("/api/runtime/agents/agent-2/history"))).toBe(true);
-    expect(historyCalls.some((url) => url.includes("/api/runtime/agents/agent-1/history"))).toBe(false);
+    expect(semanticCalls.length).toBe(0);
 
     vi.unstubAllGlobals();
   });
@@ -438,7 +449,30 @@ describe("useRuntimeSyncController", () => {
     expect(inFlightSeen).toEqual([false, true, false]);
   });
 
-  it("uses domain runtime APIs and expands semantic transcript limit for load-more", async () => {
+  it("uses shared gateway chat-history max in non-domain mode by default", async () => {
+    const ctx = renderController({
+      status: "disconnected",
+      useDomainApiReads: false,
+      maxHistoryLimit: undefined,
+      agents: [createAgent({ historyFetchLimit: 5_000 })],
+      focusedAgentId: null,
+      focusedAgentRunning: false,
+    });
+
+    await act(async () => {
+      await ctx.getValue().loadAgentHistory("agent-1", { limit: 5_000 });
+    });
+
+    expect(mockedRunHistorySyncOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "agent-1",
+        requestedLimit: 5_000,
+        maxLimit: RUNTIME_SYNC_MAX_HISTORY_LIMIT,
+      })
+    );
+  });
+
+  it("uses domain runtime APIs and uses chat-history load-more limit floor", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/runtime/summary")) {
@@ -451,19 +485,13 @@ describe("useRuntimeSyncController", () => {
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
       }
-      if (url.includes("/api/runtime/agents/agent-1/history")) {
+      if (url.includes("/api/runtime/chat-history")) {
         return new Response(
           JSON.stringify({
-            enabled: true,
-            entries: [],
-            hasMore: true,
-            nextBeforeOutboxId: null,
-            semanticTurnsIncluded: 2,
-            windowTruncated: true,
-            activeRun: {
-              runId: null,
-              status: "idle",
-              complete: true,
+            ok: true,
+            payload: {
+              sessionKey: "agent:agent-1:main",
+              messages: [],
             },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
@@ -484,17 +512,16 @@ describe("useRuntimeSyncController", () => {
       focusedAgentRunning: false,
     });
 
+    mockedRunHistorySyncOperation.mockImplementation(async (params) => {
+      await params.client.call("chat.history", {
+        sessionKey: "agent:agent-1:main",
+        limit: 100,
+      });
+      return [];
+    });
+
     await act(async () => {
       await ctx.getValue().loadAgentHistory("agent-1", { limit: 2 });
-    });
-    expect(ctx.dispatch).toHaveBeenCalledWith({
-      type: "updateAgent",
-      agentId: "agent-1",
-      patch: expect.objectContaining({
-        historyFetchLimit: 2,
-        historyFetchedCount: 2,
-        historyMaybeTruncated: true,
-      }),
     });
 
     await act(async () => {
@@ -502,62 +529,37 @@ describe("useRuntimeSyncController", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+    expect(mockedRunHistorySyncOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "agent-1",
+        requestedLimit: 100,
+      })
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining(
-        "/api/runtime/agents/agent-1/history?limit=400&view=semantic&turnLimit=50&scanLimit=800"
+        "/api/runtime/chat-history?sessionKey=agent%3Aagent-1%3Amain&limit=100"
       ),
       expect.anything()
     );
+    expect(
+      fetchMock.mock.calls.map((call) => String(call[0])).some((url) => url.includes("/api/runtime/agents/"))
+    ).toBe(false);
 
     expect(ctx.call).not.toHaveBeenCalledWith("status", {});
     vi.unstubAllGlobals();
     ctx.unmount();
   });
 
-  it("hydrates semantic domain history through history sync so user turns can be restored", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("/api/runtime/agents/agent-1/history")) {
-        return new Response(
-          JSON.stringify({
-            enabled: true,
-            entries: [
-              {
-                id: 6,
-                event: {
-                  type: "gateway.event",
-                  event: "chat",
-                  seq: 6,
-                  payload: {
-                    runId: "run-1",
-                    sessionKey: "agent:agent-1:main",
-                    state: "final",
-                    message: { role: "assistant", content: "assistant only outbox turn" },
-                  },
-                  asOf: "2026-03-01T00:00:06.000Z",
-                },
-                createdAt: "2026-03-01T00:00:06.000Z",
-              },
-            ],
-            hasMore: false,
-            nextBeforeOutboxId: null,
-            semanticTurnsIncluded: 1,
-            windowTruncated: false,
-            activeRun: {
-              runId: null,
-              status: "idle",
-              complete: true,
-            },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
-      }
-      return new Response(JSON.stringify({ enabled: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    vi.stubGlobal("fetch", fetchMock);
+  it("executes domain history sync commands through shared history operation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ enabled: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      )
+    );
 
     mockedRunHistorySyncOperation.mockResolvedValue([
       {
@@ -621,41 +623,6 @@ describe("useRuntimeSyncController", () => {
   it("clamps domain transcript hydration requests to gateway chat.history max limit", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/api/runtime/agents/agent-1/history")) {
-        return new Response(
-          JSON.stringify({
-            enabled: true,
-            entries: [
-              {
-                id: 6,
-                event: {
-                  type: "gateway.event",
-                  event: "chat",
-                  seq: 6,
-                  payload: {
-                    runId: "run-1",
-                    sessionKey: "agent:agent-1:main",
-                    state: "final",
-                    message: { role: "assistant", content: "assistant only outbox turn" },
-                  },
-                  asOf: "2026-03-01T00:00:06.000Z",
-                },
-                createdAt: "2026-03-01T00:00:06.000Z",
-              },
-            ],
-            hasMore: false,
-            nextBeforeOutboxId: null,
-            semanticTurnsIncluded: 1,
-            windowTruncated: false,
-            activeRun: {
-              runId: null,
-              status: "idle",
-              complete: true,
-            },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
-      }
       if (url.includes("/api/runtime/chat-history")) {
         return new Response(
           JSON.stringify({
@@ -698,153 +665,14 @@ describe("useRuntimeSyncController", () => {
     expect(mockedRunHistorySyncOperation).toHaveBeenCalledWith(
       expect.objectContaining({
         agentId: "agent-1",
-        requestedLimit: 1_000,
+        requestedLimit: 5_000,
+        maxLimit: 1_000,
       })
-    );
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "/api/runtime/agents/agent-1/history?limit=1000&view=semantic&turnLimit=50&scanLimit=800"
-      ),
-      expect.anything()
     );
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/runtime/chat-history?sessionKey=agent%3Aagent-1%3Amain&limit=1000"),
       expect.anything()
     );
-    expect(ctx.dispatch).toHaveBeenCalledWith({
-      type: "updateAgent",
-      agentId: "agent-1",
-      patch: expect.objectContaining({
-        historyFetchLimit: 1_000,
-      }),
-    });
-
-    vi.unstubAllGlobals();
-    ctx.unmount();
-  });
-
-  it("does not request raw outbox backfill pages during semantic domain history loads", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("/api/runtime/agents/agent-1/history")) {
-        return new Response(
-          JSON.stringify({
-            enabled: true,
-            entries: [],
-            hasMore: true,
-            nextBeforeOutboxId: 10,
-            semanticTurnsIncluded: 0,
-            windowTruncated: true,
-            activeRun: {
-              runId: "run-1",
-              status: "running",
-              complete: false,
-            },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
-      }
-      return new Response(JSON.stringify({ enabled: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const ctx = renderController({
-      status: "disconnected",
-      useDomainApiReads: true,
-      agents: [createAgent({ historyFetchLimit: 2 })],
-      focusedAgentId: null,
-      focusedAgentRunning: false,
-    });
-
-    await act(async () => {
-      await ctx.getValue().loadAgentHistory("agent-1", { limit: 2 });
-    });
-
-    const historyCalls = fetchMock.mock.calls
-      .map((call) => String(call[0]))
-      .filter((url) => url.includes("/api/runtime/agents/agent-1/history"));
-    expect(historyCalls.some((url) => url.includes("view=semantic"))).toBe(true);
-    expect(historyCalls.some((url) => url.includes("view=raw"))).toBe(false);
-
-    vi.unstubAllGlobals();
-    ctx.unmount();
-  });
-
-  it("does not replay outbox history entries through ingest callback", async () => {
-    let historyCallCount = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("/api/runtime/agents/agent-1/history")) {
-        historyCallCount += 1;
-        if (historyCallCount === 1) {
-          return new Response(
-            JSON.stringify({
-              enabled: true,
-              entries: [
-                {
-                  id: 5,
-                  event: {
-                    type: "gateway.event",
-                    event: "runtime.delta",
-                    seq: 5,
-                    payload: { sessionKey: "agent:agent-1:main", delta: "old" },
-                    asOf: "2026-03-01T00:00:05.000Z",
-                  },
-                  createdAt: "2026-03-01T00:00:05.000Z",
-                },
-              ],
-              hasMore: false,
-              nextBeforeOutboxId: null,
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } }
-          );
-        }
-        return new Response(
-          JSON.stringify({
-            enabled: true,
-            entries: [
-              {
-                id: 5,
-                event: {
-                  type: "gateway.event",
-                  event: "runtime.delta",
-                  seq: 5,
-                  payload: { sessionKey: "agent:agent-1:main", delta: "new" },
-                  asOf: "2026-03-02T00:00:05.000Z",
-                },
-                createdAt: "2026-03-02T00:00:05.000Z",
-              },
-            ],
-            hasMore: false,
-            nextBeforeOutboxId: null,
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
-      }
-      return new Response(JSON.stringify({ enabled: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const ctx = renderController({
-      status: "disconnected",
-      useDomainApiReads: true,
-      agents: [createAgent({ historyFetchLimit: 2 })],
-      focusedAgentId: null,
-      focusedAgentRunning: false,
-    });
-
-    await act(async () => {
-      await ctx.getValue().loadAgentHistory("agent-1", { limit: 2 });
-    });
-    await act(async () => {
-      await ctx.getValue().loadAgentHistory("agent-1", { limit: 2 });
-    });
 
     vi.unstubAllGlobals();
     ctx.unmount();

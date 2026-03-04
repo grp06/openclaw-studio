@@ -1,4 +1,4 @@
-import { buildAgentMainSessionKey, isSameSessionKey } from "@/lib/gateway/session-keys";
+import { buildAgentMainSessionKey } from "@/lib/gateway/session-keys";
 import { type GatewayModelPolicySnapshot } from "@/lib/gateway/models";
 import { type StudioSettings } from "@/lib/studio/settings";
 import {
@@ -128,29 +128,33 @@ export async function hydrateAgentFleetFromGateway(params: {
   const mainKey = agentsResult.mainKey?.trim() || "main";
 
   const mainSessionKeyByAgent = new Map<string, SessionsListEntry | null>();
-  await Promise.all(
-    agentsResult.agents.map(async (agent) => {
-      try {
+  if (agentsResult.agents.length > 0) {
+    try {
+      const sessions = await callGateway<SessionsListResult>(params.client, "sessions.list", {
+        includeGlobal: false,
+        includeUnknown: false,
+        search: `:${mainKey}`,
+      });
+      const entries = Array.isArray(sessions.sessions) ? sessions.sessions : [];
+      const bySessionKey = new Map<string, SessionsListEntry>();
+      for (const entry of entries) {
+        const key = typeof entry.key === "string" ? entry.key.trim() : "";
+        if (!key || bySessionKey.has(key)) continue;
+        bySessionKey.set(key, entry);
+      }
+      for (const agent of agentsResult.agents) {
         const expectedMainKey = buildAgentMainSessionKey(agent.id, mainKey);
-        const sessions = await callGateway<SessionsListResult>(params.client, "sessions.list", {
-          agentId: agent.id,
-          includeGlobal: false,
-          includeUnknown: false,
-          search: expectedMainKey,
-          limit: 4,
-        });
-        const entries = Array.isArray(sessions.sessions) ? sessions.sessions : [];
-        const mainEntry =
-          entries.find((entry) => isSameSessionKey(entry.key ?? "", expectedMainKey)) ?? null;
-        mainSessionKeyByAgent.set(agent.id, mainEntry);
-      } catch (err) {
-        if (!params.isDisconnectLikeError(err)) {
-          logError("Failed to list sessions while resolving agent session.", err);
-        }
+        mainSessionKeyByAgent.set(agent.id, bySessionKey.get(expectedMainKey) ?? null);
+      }
+    } catch (err) {
+      if (!params.isDisconnectLikeError(err)) {
+        logError("Failed to list sessions while resolving fleet sessions.", err);
+      }
+      for (const agent of agentsResult.agents) {
         mainSessionKeyByAgent.set(agent.id, null);
       }
-    })
-  );
+    }
+  }
 
   let statusSummary: SummaryStatusSnapshot | null = null;
   let previewResult: SummaryPreviewSnapshot | null = null;

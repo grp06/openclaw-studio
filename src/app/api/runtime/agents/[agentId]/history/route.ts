@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { deriveRuntimeFreshness, probeOpenClawLocalState } from "@/lib/controlplane/degraded-read";
+import { deriveRuntimeFreshness } from "@/lib/controlplane/degraded-read";
 import { serializeRuntimeInitFailure } from "@/lib/controlplane/runtime-init-errors";
 import { bootstrapDomainRuntime } from "@/lib/controlplane/runtime-route-bootstrap";
 import {
@@ -126,7 +126,6 @@ export async function GET(
     url.searchParams.get("beforeOutboxId"),
     snapshot.outboxHead + 1
   );
-  const probe = snapshot.status === "connected" ? null : await probeOpenClawLocalState();
 
   const loadWindowWithBackfill = (
     targetLimit: number
@@ -221,7 +220,6 @@ export async function GET(
     semanticTurnsIncluded,
     activeRun,
     windowTruncated,
-    freshness: deriveRuntimeFreshness(snapshot, probe),
-    ...(probe ? { probe } : {}),
+    freshness: deriveRuntimeFreshness(snapshot, null),
   });
 }

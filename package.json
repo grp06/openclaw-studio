@@ -16,6 +16,8 @@
     "build": "next build",
     "start": "node server/index.js",
     "lint": "eslint .",
+    "probe:agent-latency": "node scripts/probe-agent-history-latency.mjs",
+    "probe:fleet-latency": "node scripts/probe-fleet-latency.mjs",
     "cleanup:ux-artifacts": "node scripts/cleanup-ux-artifacts.mjs",
     "studio:setup": "node scripts/studio-setup.js",
     "smoke:dev-server": "node scripts/smoke-dev-server.mjs",

@@ -140,12 +140,6 @@ type HistorySyncPatchInput = {
   runId: string | null;
 };
 
-export type DomainHistoryActiveRun = {
-  runId: string | null;
-  status: "running" | "idle" | "error";
-  complete: boolean;
-};
-
 type GatewayEventKind =
   | "summary-refresh"
   | "runtime-chat"
@@ -355,39 +349,6 @@ export const resolveHistoryRunStatePatch = (params: {
     status: "running",
     runId: null,
     runStartedAt: lastUserAt,
-    streamText: null,
-    thinkingTrace: null,
-  };
-};
-
-export const buildDomainHistoryRunStatePatch = (params: {
-  activeRun: DomainHistoryActiveRun | null;
-  currentStatus: AgentState["status"];
-  currentRunId: string | null;
-}): Partial<AgentState> | null => {
-  const activeRun = params.activeRun;
-  if (!activeRun) return null;
-
-  if (activeRun.status === "running") {
-    const nextRunId = activeRun.runId?.trim() || params.currentRunId?.trim() || null;
-    if (params.currentStatus === "running" && nextRunId === (params.currentRunId?.trim() || null)) {
-      return null;
-    }
-    return {
-      status: "running",
-      runId: nextRunId,
-      sessionCreated: true,
-    };
-  }
-
-  if (params.currentStatus === activeRun.status && !params.currentRunId) {
-    return null;
-  }
-
-  return {
-    status: activeRun.status,
-    runId: null,
-    runStartedAt: null,
     streamText: null,
     thinkingTrace: null,
   };
