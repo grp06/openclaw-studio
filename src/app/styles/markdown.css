@@ -107,6 +107,7 @@
   font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
   font-size: 0.82em;
+  white-space: break-spaces;
   overflow-wrap: anywhere;
   word-break: break-word;
   background: color-mix(in oklch, var(--surface-3) 92%, transparent);
