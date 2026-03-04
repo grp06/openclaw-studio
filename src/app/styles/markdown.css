@@ -1,8 +1,14 @@
 .agent-markdown {
   display: block;
   white-space: normal;
+  overflow-wrap: anywhere;
   word-break: break-word;
   line-height: 1.7;
+}
+
+.agent-markdown :is(p, li, blockquote, td, th) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .agent-markdown p {
