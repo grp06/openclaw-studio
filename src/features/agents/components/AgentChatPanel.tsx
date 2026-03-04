@@ -731,7 +731,7 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
   }, [runStartedAt, showLiveAssistantCard, status]);
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden">
+    <div className="relative h-full min-h-0 overflow-hidden">
       <div
         ref={chatRef}
         data-testid="agent-chat-scroll"
@@ -1524,7 +1524,7 @@ export const AgentChatPanel = ({
 
           <div className="mt-0.5 flex w-full items-center justify-end gap-2 sm:w-auto">
             <button
-              className="nodrag ui-btn-icon lg:hidden"
+              className="nodrag ui-btn-icon md:hidden"
               type="button"
               aria-label="Expand transcript"
               title="Expand transcript"
@@ -1560,7 +1560,7 @@ export const AgentChatPanel = ({
       </div>
 
       <div className="mt-3 flex min-h-0 flex-1 flex-col px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4 sm:pb-4">
-        <div className="relative min-h-0 flex-1 overflow-hidden">
+        <div className="relative h-0 min-h-0 flex-1 overflow-hidden">
           <AgentChatTranscript
             agentId={agent.agentId}
             name={agent.name}
@@ -1632,7 +1632,7 @@ export const AgentChatPanel = ({
               Close
             </button>
           </div>
-          <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
+          <div className="h-0 min-h-0 flex-1 overflow-hidden px-2 pb-2">
             <AgentChatTranscript
               agentId={agent.agentId}
               name={agent.name}
