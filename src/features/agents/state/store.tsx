@@ -55,6 +55,11 @@ export type AgentState = AgentStoreSeed & {
   lastActivityAt: number | null;
   latestPreview: string | null;
   lastUserMessage: string | null;
+  previewItems?: Array<{
+    role: "user" | "assistant";
+    text: string;
+    timestamp?: number | string;
+  }>;
   draft: string;
   queuedMessages?: string[];
   sessionSettingsSynced: boolean;
@@ -91,6 +96,7 @@ export const buildNewSessionAgentPatch = (agent: AgentState): Partial<AgentState
     lastActivityAt: null,
     latestPreview: null,
     lastUserMessage: null,
+    previewItems: [],
     draft: "",
     queuedMessages: [],
     historyLoadedAt: null,
@@ -211,6 +217,7 @@ const createRuntimeAgentState = (
     lastActivityAt: sameSessionKey ? (existing?.lastActivityAt ?? null) : null,
     latestPreview: sameSessionKey ? (existing?.latestPreview ?? null) : null,
     lastUserMessage: sameSessionKey ? (existing?.lastUserMessage ?? null) : null,
+    previewItems: sameSessionKey ? (existing?.previewItems ?? []) : [],
     draft: sameSessionKey ? (existing?.draft ?? "") : "",
     queuedMessages,
     sessionSettingsSynced: sameSessionKey ? (existing?.sessionSettingsSynced ?? false) : false,
@@ -223,7 +230,7 @@ const createRuntimeAgentState = (
       ? (existing?.historyGatewayCapReached ?? false)
       : false,
     toolCallingEnabled: seed.toolCallingEnabled ?? existing?.toolCallingEnabled ?? false,
-    showThinkingTraces: seed.showThinkingTraces ?? existing?.showThinkingTraces ?? true,
+    showThinkingTraces: seed.showThinkingTraces ?? existing?.showThinkingTraces ?? false,
     transcriptEntries,
     transcriptRevision: sameSessionKey
       ? (existing?.transcriptRevision ?? outputLines.length)

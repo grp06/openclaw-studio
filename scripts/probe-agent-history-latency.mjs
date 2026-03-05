@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import fs from "node:fs";
+import path from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
 
@@ -9,6 +11,10 @@ const DEFAULT_WARMUP = 3;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_SLO_P95_MS = 750;
 const DEFAULT_AGENT_ID = "main";
+const DEFAULT_LOG_DIR = ".agent/local/latency-probes";
+const DEFAULT_LOG_FILENAME = "probe-agent-latency-runs.jsonl";
+const DEFAULT_LATEST_LOG_FILENAME = "probe-agent-latency-latest.json";
+const MAX_LOGGED_ERRORS_PER_ENDPOINT = 25;
 
 const asTrimmed = (value) => {
   if (typeof value !== "string") return "";
@@ -35,6 +41,8 @@ export const parseProbeArgs = (argv) => {
     sloP95Ms: DEFAULT_SLO_P95_MS,
     json: false,
     allowDisconnected: false,
+    logDir: null,
+    persistLogs: true,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -46,6 +54,10 @@ export const parseProbeArgs = (argv) => {
     }
     if (token === "--allow-disconnected") {
       config.allowDisconnected = true;
+      continue;
+    }
+    if (token === "--no-persist-logs") {
+      config.persistLogs = false;
       continue;
     }
     const value = asTrimmed(argv[index + 1]);
@@ -87,6 +99,11 @@ export const parseProbeArgs = (argv) => {
       index += 1;
       continue;
     }
+    if (token === "--log-dir") {
+      config.logDir = value;
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown argument: ${token}`);
   }
 
@@ -96,6 +113,52 @@ export const parseProbeArgs = (argv) => {
     agentId: config.agentId ? config.agentId.trim() : null,
     sessionKey: config.sessionKey ? config.sessionKey.trim() : null,
   };
+};
+
+export const resolveProbeLogDir = (configuredLogDir) => {
+  const normalized = asTrimmed(configuredLogDir);
+  if (normalized) return path.resolve(normalized);
+  return path.resolve(process.cwd(), DEFAULT_LOG_DIR);
+};
+
+const buildRunId = () => {
+  const nowPart = Date.now().toString(36);
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `${nowPart}-${randomPart}`;
+};
+
+export const persistProbeRunLog = (params) => {
+  const logDir = resolveProbeLogDir(params.logDir);
+  const runsFile = path.join(logDir, DEFAULT_LOG_FILENAME);
+  const latestFile = path.join(logDir, DEFAULT_LATEST_LOG_FILENAME);
+  const record = {
+    runId: buildRunId(),
+    loggedAt: new Date().toISOString(),
+    argv: Array.isArray(params.rawArgs) ? params.rawArgs : [],
+    ...params.payload,
+  };
+
+  try {
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(runsFile, `${JSON.stringify(record)}\n`, "utf8");
+    fs.writeFileSync(latestFile, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+    return {
+      persisted: true,
+      logDir,
+      runsFile,
+      latestFile,
+      runId: record.runId,
+      loggedAt: record.loggedAt,
+    };
+  } catch (error) {
+    return {
+      persisted: false,
+      logDir,
+      runsFile,
+      latestFile,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 };
 
 export const parseAgentIdFromSessionKey = (sessionKey) => {
@@ -332,12 +395,19 @@ const loadFleetResult = async ({ baseUrl, timeoutMs }) => {
 };
 
 const runEndpointProbe = async ({ baseUrl, endpoint, warmup, samples, timeoutMs }) => {
+  const warmupDurations = [];
+  let warmupErrors = 0;
   for (let index = 0; index < warmup; index += 1) {
-    await timedRequest({ baseUrl, endpoint, timeoutMs });
+    const response = await timedRequest({ baseUrl, endpoint, timeoutMs });
+    warmupDurations.push(response.durationMs);
+    if (!response.ok) {
+      warmupErrors += 1;
+    }
   }
 
   const durations = [];
   let errorCount = 0;
+  const sampleErrors = [];
   let lastError = null;
   for (let index = 0; index < samples; index += 1) {
     const response = await timedRequest({ baseUrl, endpoint, timeoutMs });
@@ -350,6 +420,14 @@ const runEndpointProbe = async ({ baseUrl, endpoint, warmup, samples, timeoutMs 
       status: response.status,
       message: response.error || "request_failed",
     };
+    if (sampleErrors.length < MAX_LOGGED_ERRORS_PER_ENDPOINT) {
+      sampleErrors.push({
+        sample: index + 1,
+        status: response.status,
+        durationMs: response.durationMs,
+        message: response.error || "request_failed",
+      });
+    }
   }
 
   return {
@@ -362,6 +440,13 @@ const runEndpointProbe = async ({ baseUrl, endpoint, warmup, samples, timeoutMs 
       count: errorCount,
       last: lastError,
     },
+    probe: {
+      warmupCount: warmup,
+      warmupDurationsMs: warmupDurations,
+      warmupErrors,
+      sampleDurationsMs: durations,
+      sampleErrors,
+    },
   };
 };
 
@@ -372,6 +457,7 @@ const printHumanOutput = ({
   assessment,
   fleetWarning,
   preflightMessage,
+  logInfo,
 }) => {
   if (preflightMessage) {
     process.stdout.write(`${preflightMessage}\n`);
@@ -408,12 +494,74 @@ const printHumanOutput = ({
     }
   }
   process.stdout.write(`diagnosis: ${assessment.bottleneckHint}\n`);
+  if (logInfo?.persisted) {
+    process.stdout.write(
+      `logs: run=${logInfo.runId} file=${logInfo.runsFile} latest=${logInfo.latestFile}\n`
+    );
+  } else if (logInfo?.error) {
+    process.stdout.write(`warning: failed to persist logs (${logInfo.error})\n`);
+  }
   process.stdout.write(`result: ${assessment.pass ? "PASS" : "FAIL"}\n`);
 };
 
-export const runProbe = async (rawArgs) => {
-  const args = parseProbeArgs(rawArgs);
+const finalizeProbeResult = ({ args, rawArgs, payload, endpointResults, fleetWarning }) => {
+  const logInfo = args.persistLogs
+    ? persistProbeRunLog({
+        logDir: args.logDir,
+        payload,
+        rawArgs,
+      })
+    : { persisted: false, reason: "disabled" };
 
+  const outputPayload = {
+    ...payload,
+    log: logInfo,
+  };
+
+  if (args.json) {
+    process.stdout.write(`${JSON.stringify(outputPayload, null, 2)}\n`);
+  } else {
+    printHumanOutput({
+      target: outputPayload.target,
+      config: outputPayload.config,
+      endpoints: endpointResults,
+      assessment: outputPayload.assessment,
+      fleetWarning,
+      preflightMessage: outputPayload.preflight.message,
+      logInfo,
+    });
+  }
+
+  if (!outputPayload.assessment.pass) {
+    process.exitCode = 1;
+  }
+};
+
+export const runProbe = async (rawArgs) => {
+  const startedAt = new Date().toISOString();
+  const trace = [];
+  const addTrace = (phase, meta = {}) => {
+    trace.push({
+      at: new Date().toISOString(),
+      phase,
+      ...meta,
+    });
+  };
+
+  const args = parseProbeArgs(rawArgs);
+  addTrace("probe:start", {
+    baseUrl: args.baseUrl,
+    agentId: args.agentId,
+    sessionKey: args.sessionKey,
+    samples: args.samples,
+    warmup: args.warmup,
+    timeoutMs: args.timeoutMs,
+    sloP95Ms: args.sloP95Ms,
+    allowDisconnected: args.allowDisconnected,
+    persistLogs: args.persistLogs,
+  });
+
+  const preflightStartedAt = performance.now();
   const preflightResponse = await timedRequest({
     baseUrl: args.baseUrl,
     endpoint: {
@@ -427,47 +575,58 @@ export const runProbe = async (rawArgs) => {
     response: preflightResponse,
     allowDisconnected: args.allowDisconnected,
   });
+  addTrace("probe:preflight", {
+    pass: preflight.pass,
+    status: preflight.status,
+    connected: preflight.connected,
+    durationMs: performance.now() - preflightStartedAt,
+  });
 
   if (!preflight.pass) {
-    if (args.json) {
-      process.stdout.write(
-        `${JSON.stringify(
-          {
-            target: {
-              baseUrl: args.baseUrl,
-              agentId: args.agentId,
-              sessionKey: args.sessionKey,
-            },
-            config: {
-              samples: args.samples,
-              warmup: args.warmup,
-              timeoutMs: args.timeoutMs,
-              sloP95Ms: args.sloP95Ms,
-              allowDisconnected: args.allowDisconnected,
-            },
-            endpoints: [],
-            assessment: {
-              pass: false,
-              bottleneckHint: "preflight failed",
-            },
-            preflight,
-          },
-          null,
-          2
-        )}\n`
-      );
-    } else {
-      process.stdout.write(`${preflight.message}\n`);
-      process.stdout.write("result: FAIL\n");
-    }
-    process.exitCode = 1;
+    finalizeProbeResult({
+      args,
+      rawArgs,
+      endpointResults: [],
+      fleetWarning: null,
+      payload: {
+        run: {
+          startedAt,
+          finishedAt: new Date().toISOString(),
+        },
+        target: {
+          baseUrl: args.baseUrl,
+          agentId: args.agentId,
+          sessionKey: args.sessionKey,
+        },
+        config: {
+          samples: args.samples,
+          warmup: args.warmup,
+          timeoutMs: args.timeoutMs,
+          sloP95Ms: args.sloP95Ms,
+          allowDisconnected: args.allowDisconnected,
+        },
+        endpoints: [],
+        assessment: {
+          pass: false,
+          bottleneckHint: "preflight failed",
+        },
+        preflight,
+        trace,
+      },
+    });
     return;
   }
 
   const fleetResolutionNeeded = !args.agentId && !parseAgentIdFromSessionKey(args.sessionKey);
+  const fleetStartedAt = performance.now();
   const fleetLoaded = fleetResolutionNeeded
     ? await loadFleetResult({ baseUrl: args.baseUrl, timeoutMs: args.timeoutMs })
     : { result: null, warning: null };
+  addTrace("probe:fleet", {
+    resolvedViaFleet: fleetResolutionNeeded,
+    warning: fleetLoaded.warning,
+    durationMs: performance.now() - fleetStartedAt,
+  });
 
   const target = resolveTargetFromFleet({
     explicitAgentId: args.agentId,
@@ -478,23 +637,43 @@ export const runProbe = async (rawArgs) => {
 
   const endpointResults = [];
   for (const endpoint of endpoints) {
-    endpointResults.push(
+    const endpointStartedAt = performance.now();
+    addTrace("probe:endpoint:start", {
+      endpoint: endpoint.name,
+      path: endpoint.path,
+    });
+    const endpointResult =
       await runEndpointProbe({
         baseUrl: args.baseUrl,
         endpoint,
         warmup: args.warmup,
         samples: args.samples,
         timeoutMs: args.timeoutMs,
-      })
-    );
+      });
+    endpointResults.push(endpointResult);
+    addTrace("probe:endpoint:finish", {
+      endpoint: endpoint.name,
+      status: endpointResult.status,
+      errors: endpointResult.errors.count,
+      p95Ms: endpointResult.stats.p95Ms,
+      durationMs: performance.now() - endpointStartedAt,
+    });
   }
 
   const assessment = assessProbe({
     endpoints: endpointResults,
     sloP95Ms: args.sloP95Ms,
   });
+  addTrace("probe:assessment", {
+    pass: assessment.pass,
+    bottleneckHint: assessment.bottleneckHint,
+  });
 
   const payload = {
+    run: {
+      startedAt,
+      finishedAt: new Date().toISOString(),
+    },
     target: {
       baseUrl: args.baseUrl,
       agentId: target.agentId,
@@ -513,27 +692,20 @@ export const runProbe = async (rawArgs) => {
       status: entry.status,
       stats: entry.stats,
       errors: entry.errors,
+      probe: entry.probe,
     })),
     assessment,
     preflight,
+    trace,
   };
 
-  if (args.json) {
-    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
-  } else {
-    printHumanOutput({
-      target: payload.target,
-      config: payload.config,
-      endpoints: endpointResults,
-      assessment: payload.assessment,
-      fleetWarning: fleetLoaded.warning,
-      preflightMessage: preflight.message,
-    });
-  }
-
-  if (!assessment.pass) {
-    process.exitCode = 1;
-  }
+  finalizeProbeResult({
+    args,
+    rawArgs,
+    payload,
+    endpointResults,
+    fleetWarning: fleetLoaded.warning,
+  });
 };
 
 const isDirectRun = (() => {

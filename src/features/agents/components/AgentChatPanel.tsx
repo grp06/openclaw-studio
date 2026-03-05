@@ -32,6 +32,11 @@ import {
   type AssistantTraceEvent,
   type AgentChatItem,
 } from "./chatItems";
+import { logTranscriptDebugMetric } from "@/features/agents/state/transcript";
+import {
+  buildChatFirstPaintCycleKey,
+  resolveChatFirstPaint,
+} from "@/features/agents/operations/chatFirstPaintWorkflow";
 
 const formatChatTimestamp = (timestampMs: number): string => {
   return new Intl.DateTimeFormat(undefined, {
@@ -336,12 +341,17 @@ const ThinkingDetailsRow = memo(function ThinkingDetailsRow({
 const UserMessageCard = memo(function UserMessageCard({
   text,
   timestampMs,
+  testId,
 }: {
   text: string;
   timestampMs?: number;
+  testId?: string;
 }) {
   return (
-    <div className="ui-chat-user-card w-full max-w-[70ch] self-end overflow-hidden rounded-[var(--radius-small)] bg-[color:var(--chat-user-bg)]">
+    <div
+      className="ui-chat-user-card w-full max-w-[70ch] self-end overflow-hidden rounded-[var(--radius-small)] bg-[color:var(--chat-user-bg)]"
+      {...(testId ? { "data-testid": testId } : {})}
+    >
       <div className="flex items-center justify-between gap-3 bg-[color:var(--chat-user-header-bg)] px-3 py-2 dark:px-3.5 dark:py-2.5">
         <div className="type-meta min-w-0 truncate font-mono text-foreground/90">
           You
@@ -370,6 +380,7 @@ const AssistantMessageCard = memo(function AssistantMessageCard({
   thinkingDurationMs,
   contentText,
   streaming,
+  testId,
 }: {
   avatarSeed: string;
   avatarUrl: string | null;
@@ -381,6 +392,7 @@ const AssistantMessageCard = memo(function AssistantMessageCard({
   thinkingDurationMs?: number;
   contentText?: string | null;
   streaming?: boolean;
+  testId?: string;
 }) {
   const resolvedTimestamp = typeof timestampMs === "number" ? timestampMs : null;
   const hasThinking = Boolean(
@@ -395,7 +407,7 @@ const AssistantMessageCard = memo(function AssistantMessageCard({
   const compactStreamingIndicator = Boolean(streaming && !hasThinking && !hasContent);
 
   return (
-    <div className="w-full self-start">
+    <div className="w-full self-start" {...(testId ? { "data-testid": testId } : {})}>
       <div className={`relative w-full ${widthClass} ${ASSISTANT_GUTTER_CLASS}`}>
         <div className="absolute left-[4px] top-[2px]">
           <AgentAvatar seed={avatarSeed} name={name} avatarUrl={avatarUrl} size={22} />
@@ -603,6 +615,9 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
   pendingExecApprovals,
   onResolveExecApproval,
   emptyStateTitle,
+  lastUserMessage,
+  latestPreview,
+  previewItems,
 }: {
   agentId: string;
   name: string;
@@ -625,6 +640,13 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
   pendingExecApprovals: PendingExecApproval[];
   onResolveExecApproval?: (id: string, decision: ExecApprovalDecision) => void;
   emptyStateTitle: string;
+  lastUserMessage: string | null;
+  latestPreview: string | null;
+  previewItems?: Array<{
+    role: "user" | "assistant";
+    text: string;
+    timestamp?: number | string;
+  }>;
 }) {
   const chatRef = useRef<HTMLDivElement | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
@@ -714,7 +736,47 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
   const showLiveAssistantCard =
     status === "running" && Boolean(liveThinkingText || liveAssistantText || showTypingIndicator);
   const hasApprovals = pendingExecApprovals.length > 0;
-  const hasTranscriptContent = chatItems.length > 0 || hasApprovals;
+  const hasTranscriptItems = chatItems.length > 0;
+  const provisionalConversationItems = (() => {
+    const normalizedPreviewItems = (previewItems ?? [])
+      .map((item) => ({
+        role: item.role,
+        text: item.text.trim(),
+        timestampMs:
+          typeof item.timestamp === "number"
+            ? item.timestamp
+            : typeof item.timestamp === "string"
+              ? Date.parse(item.timestamp)
+              : Number.NaN,
+      }))
+      .filter((item) => item.text.length > 0)
+      .map((item) => ({
+        role: item.role,
+        text: item.text,
+        ...(Number.isFinite(item.timestampMs) ? { timestampMs: item.timestampMs } : {}),
+      }));
+    if (normalizedPreviewItems.length > 0) {
+      return normalizedPreviewItems;
+    }
+    const fallbackItems: Array<{ role: "user" | "assistant"; text: string; timestampMs?: number }> = [];
+    const provisionalUserMessage = lastUserMessage?.trim() ?? "";
+    const provisionalAssistantPreview = latestPreview?.trim() ?? "";
+    if (provisionalUserMessage.length > 0) {
+      fallbackItems.push({ role: "user", text: provisionalUserMessage });
+    }
+    if (provisionalAssistantPreview.length > 0) {
+      fallbackItems.push({ role: "assistant", text: provisionalAssistantPreview });
+    }
+    return fallbackItems;
+  })();
+  const hasProvisionalContent = provisionalConversationItems.length > 0;
+  const hasRenderableContent = hasTranscriptItems || hasProvisionalContent || hasApprovals;
+  const firstProvisionalUserIndex = provisionalConversationItems.findIndex(
+    (item) => item.role === "user"
+  );
+  const firstProvisionalAssistantIndex = provisionalConversationItems.findIndex(
+    (item) => item.role === "assistant"
+  );
 
   useEffect(() => {
     if (status !== "running" || typeof runStartedAt !== "number" || !showLiveAssistantCard) {
@@ -768,7 +830,7 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
               )}
             </div>
           ) : null}
-          {!hasTranscriptContent ? (
+          {!hasRenderableContent ? (
             <AssistantIntroCard
               avatarSeed={avatarSeed}
               avatarUrl={avatarUrl}
@@ -777,15 +839,44 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
             />
           ) : (
             <>
-              <AgentChatFinalItems
-                agentId={agentId}
-                name={name}
-                avatarSeed={avatarSeed}
-                avatarUrl={avatarUrl}
-                chatItems={chatItems}
-                running={status === "running"}
-                runStartedAt={runStartedAt}
-              />
+              {hasTranscriptItems ? (
+                <AgentChatFinalItems
+                  agentId={agentId}
+                  name={name}
+                  avatarSeed={avatarSeed}
+                  avatarUrl={avatarUrl}
+                  chatItems={chatItems}
+                  running={status === "running"}
+                  runStartedAt={runStartedAt}
+                />
+              ) : (
+                <>
+                  {provisionalConversationItems.map((item, index) =>
+                    item.role === "user" ? (
+                      <UserMessageCard
+                        key={`provisional-user-${index}`}
+                        text={item.text}
+                        timestampMs={item.timestampMs}
+                        testId={index === firstProvisionalUserIndex ? "agent-provisional-user" : undefined}
+                      />
+                    ) : (
+                      <AssistantMessageCard
+                        key={`provisional-assistant-${index}`}
+                        avatarSeed={avatarSeed}
+                        avatarUrl={avatarUrl}
+                        name={name}
+                        contentText={item.text}
+                        timestampMs={item.timestampMs}
+                        testId={
+                          index === firstProvisionalAssistantIndex
+                            ? "agent-provisional-assistant"
+                            : undefined
+                        }
+                      />
+                    )
+                  )}
+                </>
+              )}
               {showLiveAssistantCard ? (
                 <AssistantMessageCard
                   avatarSeed={avatarSeed}
@@ -1143,6 +1234,18 @@ export const AgentChatPanel = ({
     agentId: agent.agentId,
     sessionKey: agent.sessionKey,
   });
+  const firstPaintCycleRef = useRef<{
+    cycleKey: string;
+    startedAtMs: number;
+  }>({
+    cycleKey: buildChatFirstPaintCycleKey({
+      agentId: agent.agentId,
+      sessionKey: agent.sessionKey,
+      sessionEpoch: agent.sessionEpoch,
+    }),
+    startedAtMs: Date.now(),
+  });
+  const firstPaintLoggedCycleKeyRef = useRef<string | null>(null);
   const pendingResizeFrameRef = useRef<number | null>(null);
 
   const resizeDraft = useCallback(() => {
@@ -1176,6 +1279,18 @@ export const AgentChatPanel = ({
     plainDraftRef.current = "";
     setDraftValue("");
   }, [agent.agentId, agent.draft, agent.sessionKey]);
+
+  useEffect(() => {
+    firstPaintCycleRef.current = {
+      cycleKey: buildChatFirstPaintCycleKey({
+        agentId: agent.agentId,
+        sessionKey: agent.sessionKey,
+        sessionEpoch: agent.sessionEpoch,
+      }),
+      startedAtMs: Date.now(),
+    };
+    firstPaintLoggedCycleKeyRef.current = null;
+  }, [agent.agentId, agent.sessionEpoch, agent.sessionKey]);
 
   useEffect(() => {
     setRenameEditing(false);
@@ -1242,6 +1357,40 @@ export const AgentChatPanel = ({
       }),
     [chatItems]
   );
+  useEffect(() => {
+    const cycle = firstPaintCycleRef.current;
+    const resolution = resolveChatFirstPaint({
+      transcriptItemCount: visibleChatItems.length,
+      lastUserMessage: agent.lastUserMessage,
+      latestPreview: agent.latestPreview,
+      agentId: agent.agentId,
+      sessionKey: agent.sessionKey,
+      sessionEpoch: agent.sessionEpoch,
+      focusStartedAtMs: cycle.startedAtMs,
+    });
+    if (resolution.source === "none") return;
+    if (resolution.cycleKey !== cycle.cycleKey) return;
+    if (firstPaintLoggedCycleKeyRef.current === resolution.cycleKey) return;
+
+    firstPaintLoggedCycleKeyRef.current = resolution.cycleKey;
+    logTranscriptDebugMetric("chat_first_content", {
+      agentId: agent.agentId,
+      sessionKey: agent.sessionKey,
+      sessionEpoch: agent.sessionEpoch ?? 0,
+      source: resolution.source,
+      elapsedMs: resolution.elapsedMs,
+      transcriptItemCount: visibleChatItems.length,
+      hasLastUserMessage: resolution.hasLastUserMessage,
+      hasLatestPreview: resolution.hasLatestPreview,
+    });
+  }, [
+    agent.agentId,
+    agent.lastUserMessage,
+    agent.latestPreview,
+    agent.sessionEpoch,
+    agent.sessionKey,
+    visibleChatItems.length,
+  ]);
   const running = agent.status === "running";
   const renderBlocks = useMemo(
     () => buildAgentChatRenderBlocks(visibleChatItems),
@@ -1543,6 +1692,9 @@ export const AgentChatPanel = ({
           pendingExecApprovals={pendingExecApprovals}
           onResolveExecApproval={onResolveExecApproval}
           emptyStateTitle={emptyStateTitle}
+          lastUserMessage={agent.lastUserMessage}
+          latestPreview={agent.latestPreview}
+          previewItems={agent.previewItems}
         />
 
         <div className="mt-3">

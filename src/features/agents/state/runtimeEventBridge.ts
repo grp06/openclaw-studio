@@ -105,6 +105,12 @@ type SummaryPreviewItem = {
   timestamp?: number | string;
 };
 
+type ProvisionalPreviewItem = {
+  role: "user" | "assistant";
+  text: string;
+  timestamp?: number | string;
+};
+
 type SummaryPreviewEntry = {
   key: string;
   status: "ok" | "empty" | "missing" | "error";
@@ -508,6 +514,22 @@ export const buildSummarySnapshotPatches = ({
     addActivity(group.recent);
   }
   const patches: SummarySnapshotPatch[] = [];
+  const sanitizePreviewItems = (items: SummaryPreviewItem[]): ProvisionalPreviewItem[] => {
+    const sanitized: ProvisionalPreviewItem[] = [];
+    for (const item of items) {
+      if (item.role !== "user" && item.role !== "assistant") continue;
+      const text = stripUiMetadata(item.text ?? "").trim();
+      if (!text) continue;
+      sanitized.push({
+        role: item.role,
+        text,
+        ...(typeof item.timestamp === "number" || typeof item.timestamp === "string"
+          ? { timestamp: item.timestamp }
+          : {}),
+      });
+    }
+    return sanitized;
+  };
   for (const agent of agents) {
     const patch: Partial<AgentState> = {};
     const activity = activityByKey.get(agent.sessionKey);
@@ -516,6 +538,10 @@ export const buildSummarySnapshotPatches = ({
     }
     const preview = previewMap.get(agent.sessionKey);
     if (preview?.items?.length) {
+      const previewItems = sanitizePreviewItems(preview.items);
+      if (previewItems.length > 0) {
+        patch.previewItems = previewItems;
+      }
       const latestItem = preview.items[preview.items.length - 1];
       if (latestItem?.role === "assistant" && agent.status !== "running") {
         const previewTs = toTimestampMs(latestItem.timestamp);
@@ -525,15 +551,13 @@ export const buildSummarySnapshotPatches = ({
           patch.lastAssistantMessageAt = activity;
         }
       }
-      const lastAssistant = [...preview.items]
-        .reverse()
-        .find((item) => item.role === "assistant");
-      const lastUser = [...preview.items].reverse().find((item) => item.role === "user");
+      const lastAssistant = [...previewItems].reverse().find((item) => item.role === "assistant");
+      const lastUser = [...previewItems].reverse().find((item) => item.role === "user");
       if (lastAssistant?.text) {
-        patch.latestPreview = stripUiMetadata(lastAssistant.text);
+        patch.latestPreview = lastAssistant.text;
       }
       if (lastUser?.text) {
-        patch.lastUserMessage = stripUiMetadata(lastUser.text);
+        patch.lastUserMessage = lastUser.text;
       }
     }
     if (Object.keys(patch).length > 0) {

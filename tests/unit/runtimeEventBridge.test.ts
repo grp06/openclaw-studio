@@ -220,6 +220,10 @@ describe("runtime event bridge helpers", () => {
           lastAssistantMessageAt: 111,
           latestPreview: "assistant latest",
           lastUserMessage: "hello there",
+          previewItems: [
+            { role: "user", text: "hello there" },
+            { role: "assistant", text: "assistant latest", timestamp: "not-a-date" },
+          ],
         },
       },
       {
@@ -273,6 +277,7 @@ describe("runtime event bridge helpers", () => {
         patch: {
           lastActivityAt: 111,
           latestPreview: "assistant latest",
+          previewItems: [{ role: "assistant", text: "assistant latest", timestamp: 999 }],
         },
       },
     ]);

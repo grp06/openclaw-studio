@@ -1,5 +1,9 @@
 // @vitest-environment node
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -8,7 +12,9 @@ import {
   buildProbePaths,
   classifyBottleneckHint,
   parseProbeArgs,
+  persistProbeRunLog,
   percentile,
+  resolveProbeLogDir,
   resolveTargetFromFleet,
   summarizeDurations,
 } from "../../scripts/probe-agent-history-latency.mjs";
@@ -25,6 +31,8 @@ describe("probe-agent-history-latency", () => {
       sloP95Ms: 750,
       json: false,
       allowDisconnected: false,
+      logDir: null,
+      persistLogs: true,
     });
   });
 
@@ -45,7 +53,10 @@ describe("probe-agent-history-latency", () => {
         "9000",
         "--slo-p95-ms",
         "600",
+        "--log-dir",
+        ".agent/local/custom-probe-logs",
         "--allow-disconnected",
+        "--no-persist-logs",
         "--json",
       ])
     ).toEqual({
@@ -58,7 +69,18 @@ describe("probe-agent-history-latency", () => {
       sloP95Ms: 600,
       json: true,
       allowDisconnected: true,
+      logDir: ".agent/local/custom-probe-logs",
+      persistLogs: false,
     });
+  });
+
+  it("resolves probe log directory from default and custom values", () => {
+    expect(resolveProbeLogDir(null)).toBe(
+      path.resolve(process.cwd(), ".agent/local/latency-probes")
+    );
+    expect(resolveProbeLogDir("./tmp/probe-logs")).toBe(
+      path.resolve(process.cwd(), "tmp/probe-logs")
+    );
   });
 
   it("resolves target in priority order", () => {
@@ -334,5 +356,61 @@ describe("probe-agent-history-latency", () => {
       message:
         "runtime preflight failed: unable to read /api/runtime/summary (service unavailable)",
     });
+  });
+
+  it("persists run logs as jsonl history and latest snapshot", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-studio-probe-"));
+    const persisted = persistProbeRunLog({
+      logDir: tempRoot,
+      rawArgs: ["--json"],
+      payload: {
+        run: {
+          startedAt: "2026-03-05T16:00:00.000Z",
+          finishedAt: "2026-03-05T16:00:01.000Z",
+        },
+        target: {
+          baseUrl: "http://127.0.0.1:3000",
+          agentId: "main",
+          sessionKey: "agent:main:main",
+        },
+        config: {
+          samples: 2,
+          warmup: 1,
+          timeoutMs: 1000,
+          sloP95Ms: 500,
+          allowDisconnected: true,
+        },
+        endpoints: [],
+        assessment: {
+          pass: true,
+          bottleneckHint: "summary and semantic are within SLO",
+        },
+        preflight: {
+          pass: true,
+          connected: true,
+          status: "connected",
+          message: null,
+        },
+        trace: [],
+      },
+    });
+
+    expect(persisted.persisted).toBe(true);
+    expect(fs.existsSync(persisted.runsFile)).toBe(true);
+    expect(fs.existsSync(persisted.latestFile)).toBe(true);
+
+    const lines = fs
+      .readFileSync(persisted.runsFile, "utf8")
+      .split("\n")
+      .filter((line) => line.trim().length > 0);
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.target?.agentId).toBe("main");
+    expect(parsed.runId).toBeTypeOf("string");
+    expect(parsed.loggedAt).toBeTypeOf("string");
+
+    const latest = JSON.parse(fs.readFileSync(persisted.latestFile, "utf8"));
+    expect(latest.runId).toBe(parsed.runId);
+    expect(latest.target?.sessionKey).toBe("agent:main:main");
   });
 });

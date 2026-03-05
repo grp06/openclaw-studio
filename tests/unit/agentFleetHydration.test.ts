@@ -106,6 +106,11 @@ describe("hydrateAgentFleetFromGateway", () => {
         };
       }
       if (method === "sessions.preview") {
+        expect(params).toEqual({
+          keys: ["agent:agent-1:main", "agent:agent-2:main"],
+          limit: 8,
+          maxChars: 240,
+        });
         return {
           ts: 1,
           previews: [
@@ -214,6 +219,11 @@ describe("hydrateAgentFleetFromGateway", () => {
         };
       }
       if (method === "sessions.preview") {
+        expect(params).toEqual({
+          keys: sessions.map((entry) => entry.key),
+          limit: 8,
+          maxChars: 240,
+        });
         return {
           ts: 1,
           previews: sessions.map((entry) => ({

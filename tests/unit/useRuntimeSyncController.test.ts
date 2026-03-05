@@ -4,10 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useRuntimeSyncController } from "@/features/agents/operations/useRuntimeSyncController";
 import type { AgentState } from "@/features/agents/state/store";
-import type { DomainAgentHistoryResult } from "@/lib/controlplane/domain-runtime-client";
+import type {
+  DomainAgentHistoryResult,
+  DomainSessionPreviewResult,
+} from "@/lib/controlplane/domain-runtime-client";
 
 import { hydrateDomainHistoryWindow } from "@/features/agents/operations/domainHistoryHydration";
-import { loadDomainAgentHistoryWindow } from "@/lib/controlplane/domain-runtime-client";
+import {
+  loadDomainAgentHistoryWindow,
+  loadDomainAgentPreviewWindow,
+} from "@/lib/controlplane/domain-runtime-client";
 import { fetchJson } from "@/lib/http";
 
 vi.mock("@/features/agents/operations/domainHistoryHydration", () => ({
@@ -16,6 +22,7 @@ vi.mock("@/features/agents/operations/domainHistoryHydration", () => ({
 
 vi.mock("@/lib/controlplane/domain-runtime-client", () => ({
   loadDomainAgentHistoryWindow: vi.fn(),
+  loadDomainAgentPreviewWindow: vi.fn(),
 }));
 
 vi.mock("@/lib/http", () => ({
@@ -148,17 +155,27 @@ const createHistoryResult = (): DomainAgentHistoryResult => ({
   gatewayCapped: false,
 });
 
+const createPreviewResult = (): DomainSessionPreviewResult => ({
+  enabled: true,
+  agentId: "agent-1",
+  sessionKey: "agent:agent-1:main",
+  items: [],
+});
+
 describe("useRuntimeSyncController", () => {
   const mockedLoadDomainAgentHistoryWindow = vi.mocked(loadDomainAgentHistoryWindow);
+  const mockedLoadDomainAgentPreviewWindow = vi.mocked(loadDomainAgentPreviewWindow);
   const mockedHydrateDomainHistoryWindow = vi.mocked(hydrateDomainHistoryWindow);
   const mockedFetchJson = vi.mocked(fetchJson);
 
   beforeEach(() => {
     mockedLoadDomainAgentHistoryWindow.mockReset();
+    mockedLoadDomainAgentPreviewWindow.mockReset();
     mockedHydrateDomainHistoryWindow.mockReset();
     mockedFetchJson.mockReset();
 
     mockedLoadDomainAgentHistoryWindow.mockResolvedValue(createHistoryResult());
+    mockedLoadDomainAgentPreviewWindow.mockResolvedValue(createPreviewResult());
     mockedHydrateDomainHistoryWindow.mockReturnValue({ historyLoadedAt: 1000 });
     mockedFetchJson.mockResolvedValue({ summary: {}, freshness: {} });
   });
@@ -203,6 +220,50 @@ describe("useRuntimeSyncController", () => {
     );
   });
 
+  it("loads deeper focused preview when bootstrap preview is sparse", async () => {
+    mockedLoadDomainAgentPreviewWindow.mockResolvedValue({
+      ...createPreviewResult(),
+      items: [
+        { role: "user", text: "u1" },
+        { role: "assistant", text: "a1" },
+        { role: "user", text: "u2" },
+        { role: "assistant", text: "a2" },
+      ],
+    });
+
+    const ctx = renderController({
+      status: "connected",
+      agents: [createAgent({ historyLoadedAt: null, previewItems: [{ role: "assistant", text: "one" }] })],
+      focusedAgentId: "agent-1",
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockedLoadDomainAgentPreviewWindow).toHaveBeenCalledWith({
+      agentId: "agent-1",
+      sessionKey: "agent:agent-1:main",
+      limit: 50,
+      maxChars: 480,
+    });
+    expect(ctx.dispatch).toHaveBeenCalledWith({
+      type: "updateAgent",
+      agentId: "agent-1",
+      patch: {
+        previewItems: [
+          { role: "user", text: "u1" },
+          { role: "assistant", text: "a1" },
+          { role: "user", text: "u2" },
+          { role: "assistant", text: "a2" },
+        ],
+        latestPreview: "a2",
+        lastUserMessage: "u2",
+      },
+    });
+  });
+
   it("loads domain history, hydrates it, and dispatches update", async () => {
     const ctx = renderController({
       status: "disconnected",
@@ -227,6 +288,9 @@ describe("useRuntimeSyncController", () => {
       view: "semantic",
       turnLimit: 300,
       scanLimit: 300,
+      includeThinking: true,
+      includeTools: true,
+      signal: expect.any(AbortSignal),
     });
     expect(mockedHydrateDomainHistoryWindow).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -244,6 +308,29 @@ describe("useRuntimeSyncController", () => {
         historyLoadedAt: 555,
       },
     });
+  });
+
+  it("requests compact conversation history when thinking traces are disabled", async () => {
+    const ctx = renderController({
+      status: "disconnected",
+      agents: [createAgent({ historyLoadedAt: null, showThinkingTraces: false })],
+      focusedAgentId: null,
+      defaultHistoryLimit: 50,
+      maxHistoryLimit: 300,
+    });
+
+    await act(async () => {
+      await ctx.getValue().loadAgentHistory("agent-1", { reason: "refresh" });
+    });
+
+    expect(mockedLoadDomainAgentHistoryWindow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "agent-1",
+        sessionKey: "agent:agent-1:main",
+        includeThinking: false,
+        includeTools: false,
+      })
+    );
   });
 
   it("dedupes in-flight history requests by session key", async () => {
@@ -347,6 +434,9 @@ describe("useRuntimeSyncController", () => {
       view: "semantic",
       turnLimit: 400,
       scanLimit: 500,
+      includeThinking: true,
+      includeTools: true,
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -385,5 +475,147 @@ describe("useRuntimeSyncController", () => {
     });
 
     expect(mockedLoadDomainAgentHistoryWindow).not.toHaveBeenCalled();
+  });
+
+  it("aborts in-flight history loads when clearHistoryInFlight is called", async () => {
+    const abortError = Object.assign(new Error("aborted"), { name: "AbortError" });
+    mockedLoadDomainAgentHistoryWindow.mockImplementation(
+      ({ signal }: { signal?: AbortSignal }) =>
+        new Promise<DomainAgentHistoryResult>((_, reject) => {
+          if (!signal) {
+            reject(new Error("signal missing"));
+            return;
+          }
+          if (signal.aborted) {
+            reject(abortError);
+            return;
+          }
+          signal.addEventListener(
+            "abort",
+            () => {
+              reject(abortError);
+            },
+            { once: true }
+          );
+        })
+    );
+
+    const ctx = renderController({
+      status: "disconnected",
+      agents: [createAgent({ historyLoadedAt: null })],
+      focusedAgentId: null,
+    });
+
+    const pending = ctx.getValue().loadAgentHistory("agent-1", { reason: "refresh" });
+    act(() => {
+      ctx.getValue().clearHistoryInFlight("agent:agent-1:main");
+    });
+    await act(async () => {
+      await pending;
+    });
+
+    expect(mockedHydrateDomainHistoryWindow).not.toHaveBeenCalled();
+    expect(ctx.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("aborts stale in-flight history when focused agent changes", async () => {
+    const abortError = Object.assign(new Error("aborted"), { name: "AbortError" });
+    let capturedSignal: AbortSignal | undefined;
+    mockedLoadDomainAgentHistoryWindow.mockImplementation(
+      ({ signal }: { signal?: AbortSignal }) =>
+        new Promise<DomainAgentHistoryResult>((_, reject) => {
+          capturedSignal = signal;
+          if (!signal) {
+            reject(new Error("signal missing"));
+            return;
+          }
+          if (signal.aborted) {
+            reject(abortError);
+            return;
+          }
+          signal.addEventListener(
+            "abort",
+            () => {
+              reject(abortError);
+            },
+            { once: true }
+          );
+        })
+    );
+
+    const ctx = renderController({
+      status: "disconnected",
+      agents: [createAgent({ historyLoadedAt: null })],
+      focusedAgentId: "agent-1",
+    });
+
+    const pending = ctx.getValue().loadAgentHistory("agent-1", { reason: "refresh" });
+    ctx.rerenderWith({
+      focusedAgentId: "agent-2",
+      agents: [
+        createAgent({ agentId: "agent-1", historyLoadedAt: null }),
+        createAgent({ agentId: "agent-2", sessionKey: "agent:agent-2:main", historyLoadedAt: null }),
+      ],
+    });
+    await act(async () => {
+      await pending;
+    });
+
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(mockedHydrateDomainHistoryWindow).not.toHaveBeenCalled();
+    expect(ctx.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("does not let stale finalized requests clear newer in-flight state for the same session", async () => {
+    const abortError = Object.assign(new Error("aborted"), { name: "AbortError" });
+    const pending: Array<{ resolve: (value: DomainAgentHistoryResult) => void }> = [];
+    mockedLoadDomainAgentHistoryWindow.mockImplementation(
+      ({ signal }: { signal?: AbortSignal }) =>
+        new Promise<DomainAgentHistoryResult>((resolve, reject) => {
+          if (!signal) {
+            reject(new Error("signal missing"));
+            return;
+          }
+          if (signal.aborted) {
+            reject(abortError);
+            return;
+          }
+          pending.push({ resolve });
+          signal.addEventListener(
+            "abort",
+            () => {
+              reject(abortError);
+            },
+            { once: true }
+          );
+        })
+    );
+
+    const ctx = renderController({
+      status: "disconnected",
+      agents: [createAgent({ historyLoadedAt: null })],
+      focusedAgentId: "agent-1",
+    });
+
+    const first = ctx.getValue().loadAgentHistory("agent-1", { reason: "refresh" });
+    act(() => {
+      ctx.getValue().clearHistoryInFlight("agent:agent-1:main");
+    });
+    const second = ctx.getValue().loadAgentHistory("agent-1", { reason: "refresh" });
+    await act(async () => {
+      await first;
+    });
+
+    await act(async () => {
+      await ctx.getValue().loadAgentHistory("agent-1", { reason: "refresh" });
+      await Promise.resolve();
+    });
+
+    expect(mockedLoadDomainAgentHistoryWindow).toHaveBeenCalledTimes(2);
+
+    pending[1]?.resolve(createHistoryResult());
+    await act(async () => {
+      await second;
+    });
   });
 });

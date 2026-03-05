@@ -1190,8 +1190,11 @@ const AgentStudioPage = () => {
         agentId,
         patch: { showThinkingTraces: enabled },
       });
+      if (enabled) {
+        void loadAgentHistory(agentId, { reason: "refresh" });
+      }
     },
-    [dispatch]
+    [dispatch, loadAgentHistory]
   );
 
   const handleResolveExecApproval = useCallback(

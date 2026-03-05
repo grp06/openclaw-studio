@@ -127,6 +127,10 @@ describe("fleetLifecycleWorkflow integration", () => {
           lastAssistantMessageAt: 1200,
           latestPreview: "pong",
           lastUserMessage: "ping",
+          previewItems: [
+            { role: "user", text: "ping", timestamp: 1000 },
+            { role: "assistant", text: "pong", timestamp: 1200 },
+          ],
         },
       },
     ]);

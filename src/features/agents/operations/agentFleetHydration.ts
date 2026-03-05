@@ -76,6 +76,9 @@ type HydrateAgentFleetResult = {
   configSnapshot: GatewayModelPolicySnapshot | null;
 };
 
+const SUMMARY_PREVIEW_LIMIT = 8;
+const SUMMARY_PREVIEW_MAX_CHARS = 240;
+
 export async function hydrateAgentFleetFromGateway(params: {
   client: GatewayClientLike;
   gatewayUrl: string;
@@ -172,8 +175,8 @@ export async function hydrateAgentFleetFromGateway(params: {
         callGateway<SummaryStatusSnapshot>(params.client, "status", {}),
         callGateway<SummaryPreviewSnapshot>(params.client, "sessions.preview", {
           keys: sessionKeys,
-          limit: 8,
-          maxChars: 240,
+          limit: SUMMARY_PREVIEW_LIMIT,
+          maxChars: SUMMARY_PREVIEW_MAX_CHARS,
         }),
       ]);
       statusSummary = snapshot[0] ?? null;

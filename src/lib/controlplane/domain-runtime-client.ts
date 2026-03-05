@@ -31,6 +31,21 @@ export type DomainAgentHistoryResult = {
   error?: string;
 };
 
+export type DomainSessionPreviewItem = {
+  role: "user" | "assistant";
+  text: string;
+  timestamp?: number | string;
+};
+
+export type DomainSessionPreviewResult = {
+  enabled: boolean;
+  agentId: string;
+  sessionKey: string;
+  items: DomainSessionPreviewItem[];
+  freshness?: unknown;
+  error?: string;
+};
+
 const unwrapPayload = <T>(result: Envelope<T>): T => {
   if (result && result.ok === true && "payload" in result) {
     return result.payload as T;
@@ -189,6 +204,9 @@ export const loadDomainAgentHistoryWindow = async (params: {
   turnLimit?: number;
   scanLimit?: number;
   limit?: number;
+  includeThinking?: boolean;
+  includeTools?: boolean;
+  signal?: AbortSignal;
 }): Promise<DomainAgentHistoryResult> => {
   const agentId = params.agentId.trim();
   if (!agentId) {
@@ -223,9 +241,54 @@ export const loadDomainAgentHistoryWindow = async (params: {
   if (typeof limit === "number") {
     query.set("limit", String(limit));
   }
+  if (typeof params.includeThinking === "boolean") {
+    query.set("includeThinking", params.includeThinking ? "1" : "0");
+  }
+  if (typeof params.includeTools === "boolean") {
+    query.set("includeTools", params.includeTools ? "1" : "0");
+  }
 
   return await fetchJson<DomainAgentHistoryResult>(
     `/api/runtime/agents/${encodeURIComponent(agentId)}/history?${query.toString()}`,
-    { cache: "no-store" }
+    { cache: "no-store", signal: params.signal }
+  );
+};
+
+export const loadDomainAgentPreviewWindow = async (params: {
+  agentId: string;
+  sessionKey: string;
+  limit?: number;
+  maxChars?: number;
+  signal?: AbortSignal;
+}): Promise<DomainSessionPreviewResult> => {
+  const agentId = params.agentId.trim();
+  if (!agentId) {
+    throw new Error("agentId is required.");
+  }
+  const sessionKey = params.sessionKey.trim();
+  if (!sessionKey) {
+    throw new Error("sessionKey is required.");
+  }
+  const query = new URLSearchParams();
+  query.set("sessionKey", sessionKey);
+  const limit =
+    typeof params.limit === "number" && Number.isFinite(params.limit) && params.limit > 0
+      ? Math.floor(params.limit)
+      : undefined;
+  if (typeof limit === "number") {
+    query.set("limit", String(limit));
+  }
+  const maxChars =
+    typeof params.maxChars === "number" &&
+    Number.isFinite(params.maxChars) &&
+    params.maxChars > 0
+      ? Math.floor(params.maxChars)
+      : undefined;
+  if (typeof maxChars === "number") {
+    query.set("maxChars", String(maxChars));
+  }
+  return await fetchJson<DomainSessionPreviewResult>(
+    `/api/runtime/agents/${encodeURIComponent(agentId)}/preview?${query.toString()}`,
+    { cache: "no-store", signal: params.signal }
   );
 };

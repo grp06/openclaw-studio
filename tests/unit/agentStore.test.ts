@@ -24,6 +24,7 @@ describe("agent store", () => {
     expect(next.agents).toHaveLength(1);
     expect(next.agents[0].status).toBe("idle");
     expect(next.agents[0].thinkingLevel).toBe("high");
+    expect(next.agents[0].showThinkingTraces).toBe(false);
     expect(next.agents[0].sessionCreated).toBe(false);
     expect(next.agents[0].outputLines).toEqual([]);
   });
