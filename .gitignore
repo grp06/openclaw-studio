@@ -66,8 +66,5 @@ test-results
 /worktrees
 /.claude
 
-# local issue tracker
-/.beads
-
 # bv (beads viewer) local config and caches
 .bv/
