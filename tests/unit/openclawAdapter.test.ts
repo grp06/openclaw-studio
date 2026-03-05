@@ -38,6 +38,7 @@ describe("OpenClawGatewayAdapter", () => {
     const upstreamUrl = `ws://127.0.0.1:${address.port}`;
     let observedConnectClientId: string | null = null;
     let observedConnectClientMode: string | null = null;
+    let observedConnectClientPlatform: string | null = null;
     let observedConnectCaps: string[] | null = null;
 
     upstream.on("connection", (ws) => {
@@ -47,13 +48,14 @@ describe("OpenClawGatewayAdapter", () => {
           id?: string;
           method?: string;
           params?: {
-            client?: { id?: string; mode?: string };
+            client?: { id?: string; mode?: string; platform?: string };
             caps?: string[];
           };
         };
         if (parsed?.method === "connect") {
           observedConnectClientId = parsed.params?.client?.id ?? null;
           observedConnectClientMode = parsed.params?.client?.mode ?? null;
+          observedConnectClientPlatform = parsed.params?.client?.platform ?? null;
           observedConnectCaps = Array.isArray(parsed.params?.caps) ? parsed.params.caps : null;
           ws.send(
             JSON.stringify({
@@ -81,8 +83,9 @@ describe("OpenClawGatewayAdapter", () => {
       "Control-plane gateway connection closed."
     );
     expect(Date.now() - startedAt).toBeLessThan(2_000);
-    expect(observedConnectClientId).toBe("openclaw-control-ui");
-    expect(observedConnectClientMode).toBe("webchat");
+    expect(observedConnectClientId).toBe("gateway-client");
+    expect(observedConnectClientMode).toBe("backend");
+    expect(observedConnectClientPlatform).toBe("node");
     expect(observedConnectCaps).toEqual(expect.arrayContaining(["tool-events"]));
 
     await adapter.stop();
