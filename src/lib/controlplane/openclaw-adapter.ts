@@ -214,8 +214,12 @@ export class OpenClawGatewayAdapter {
       });
       return response as T;
     } catch (error) {
-      if (!this.useLegacyControlUiProfile && this.isOperatorScopeMissingError(error)) {
+      if (this.isOperatorScopeMissingError(error)) {
         await this.switchToLegacyControlUiProfile();
+        return this.request<T>(method, params);
+      }
+      if (this.legacyProfileSwitchPromise && this.isTransientProfileSwitchError(error)) {
+        await this.legacyProfileSwitchPromise;
         return this.request<T>(method, params);
       }
       throw error;
@@ -382,11 +386,11 @@ export class OpenClawGatewayAdapter {
   }
 
   private async switchToLegacyControlUiProfile(): Promise<void> {
-    if (this.useLegacyControlUiProfile) return;
     if (this.legacyProfileSwitchPromise) {
       await this.legacyProfileSwitchPromise;
       return;
     }
+    if (this.useLegacyControlUiProfile) return;
     this.legacyProfileSwitchPromise = (async () => {
       this.useLegacyControlUiProfile = true;
       await this.stop();
@@ -398,6 +402,15 @@ export class OpenClawGatewayAdapter {
     } finally {
       this.legacyProfileSwitchPromise = null;
     }
+  }
+
+  private isTransientProfileSwitchError(error: unknown): boolean {
+    if (error instanceof ControlPlaneGatewayError) {
+      return error.code.trim().toUpperCase() === "GATEWAY_UNAVAILABLE";
+    }
+    if (!(error instanceof Error)) return false;
+    const message = error.message.trim().toLowerCase();
+    return message.includes("adapter stopped") || message.includes("connection closed");
   }
 
   private parseFrame(raw: string): GatewayEventFrame | GatewayResponseFrame | null {
