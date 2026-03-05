@@ -557,6 +557,9 @@ export async function GET(
     windowTruncated: payload.windowTruncated,
     gatewayLimit: payload.gatewayLimit,
     gatewayCapped: payload.gatewayCapped,
+    gatewayDurationMs: payload.gatewayDurationMs,
+    cacheStatus,
+    cacheAgeMs,
     freshness: deriveRuntimeFreshness(snapshot, null),
   });
 }

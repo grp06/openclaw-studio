@@ -214,6 +214,34 @@ export const buildOutputLinesFromTranscriptEntries = (
   return entries.map((entry) => entry.text);
 };
 
+const isSemanticTurnEntry = (entry: TranscriptEntry): boolean => {
+  if (entry.kind !== "user" && entry.kind !== "assistant") return false;
+  return Boolean(entry.text.trim());
+};
+
+export const boundTranscriptEntriesBySemanticTurns = (params: {
+  entries: TranscriptEntry[];
+  turnLimit: number;
+}): TranscriptEntry[] => {
+  const safeTurnLimit =
+    Number.isFinite(params.turnLimit) && params.turnLimit > 0 ? Math.floor(params.turnLimit) : 50;
+  if (params.entries.length === 0) return params.entries;
+
+  let startIndex = 0;
+  let turnCount = 0;
+  for (let index = params.entries.length - 1; index >= 0; index -= 1) {
+    if (!isSemanticTurnEntry(params.entries[index]!)) continue;
+    turnCount += 1;
+    if (turnCount > safeTurnLimit) {
+      startIndex = index + 1;
+      break;
+    }
+  }
+
+  if (startIndex <= 0) return params.entries;
+  return params.entries.slice(startIndex);
+};
+
 export const areTranscriptEntriesEqual = (
   left: TranscriptEntry[],
   right: TranscriptEntry[]

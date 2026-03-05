@@ -44,7 +44,8 @@ type HydrateDomainHistoryWindowParams = {
   requestId: string;
   requestedLimit?: number;
   view: DomainAgentHistoryView;
-  reason: "bootstrap" | "load-more" | "refresh";
+  reason: "bootstrap" | "load-more" | "refresh" | "prefetch" | "cache";
+  visibleTurnLimit?: number | null;
 };
 
 export const hydrateDomainHistoryWindow = (
@@ -75,7 +76,7 @@ export const hydrateDomainHistoryWindow = (
   const outputChanged = !areStringArraysEqual(params.agent.outputLines, nextLines);
 
   const runPatch =
-    params.reason === "load-more"
+    params.reason === "load-more" || params.reason === "prefetch"
       ? null
       : resolveHistoryRunStatePatch({
           status: params.agent.status,
@@ -88,6 +89,25 @@ export const hydrateDomainHistoryWindow = (
   const normalizedLastAssistant = history.lastAssistant
     ? normalizeAssistantDisplayText(history.lastAssistant)
     : null;
+  const fetchedCount =
+    params.view === "semantic" ? params.history.semanticTurnsIncluded : params.history.messages.length;
+  const defaultVisibleTurnLimit =
+    typeof params.requestedLimit === "number" && Number.isFinite(params.requestedLimit)
+      ? Math.max(1, Math.floor(params.requestedLimit))
+      : fetchedCount;
+  const baseVisibleTurnLimit =
+    typeof params.visibleTurnLimit === "number" && Number.isFinite(params.visibleTurnLimit)
+      ? Math.max(1, Math.floor(params.visibleTurnLimit))
+      : typeof params.agent.historyVisibleTurnLimit === "number" &&
+            Number.isFinite(params.agent.historyVisibleTurnLimit)
+        ? Math.max(1, Math.floor(params.agent.historyVisibleTurnLimit))
+        : defaultVisibleTurnLimit;
+  const targetVisibleTurnLimit =
+    params.reason === "load-more" && typeof params.requestedLimit === "number"
+      ? Math.max(baseVisibleTurnLimit, Math.max(1, Math.floor(params.requestedLimit)))
+      : baseVisibleTurnLimit;
+  const nextVisibleTurnLimit =
+    fetchedCount > 0 ? Math.min(targetVisibleTurnLimit, fetchedCount) : null;
 
   return {
     ...(transcriptChanged || outputChanged
@@ -101,10 +121,8 @@ export const hydrateDomainHistoryWindow = (
       typeof params.requestedLimit === "number" && Number.isFinite(params.requestedLimit)
         ? params.requestedLimit
         : params.agent.historyFetchLimit,
-    historyFetchedCount:
-      params.view === "semantic"
-        ? params.history.semanticTurnsIncluded
-        : params.history.messages.length,
+    historyFetchedCount: fetchedCount,
+    historyVisibleTurnLimit: nextVisibleTurnLimit,
     historyMaybeTruncated: params.history.windowTruncated,
     historyHasMore: params.history.hasMore,
     historyGatewayCapReached: params.history.gatewayCapped && params.history.windowTruncated,

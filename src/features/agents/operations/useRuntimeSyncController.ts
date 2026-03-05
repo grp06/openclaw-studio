@@ -2,6 +2,11 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { hydrateDomainHistoryWindow } from "@/features/agents/operations/domainHistoryHydration";
 import {
+  buildCachedHistoryWindowKey,
+  readCachedHistoryWindow,
+  writeCachedHistoryWindow,
+} from "@/features/agents/operations/historyWindowCache";
+import {
   RUNTIME_SYNC_DEFAULT_HISTORY_LIMIT,
   RUNTIME_SYNC_MAX_HISTORY_LIMIT,
   resolveRuntimeSyncBootstrapHistoryAgentIds,
@@ -23,10 +28,11 @@ type RuntimeSyncDispatchAction = {
   patch: Partial<AgentState>;
 };
 
-type HistoryLoadReason = "bootstrap" | "load-more" | "refresh";
+type HistoryLoadReason = "bootstrap" | "load-more" | "refresh" | "prefetch";
 
 type UseRuntimeSyncControllerParams = {
   status: "disconnected" | "connecting" | "connected";
+  gatewayUrl?: string;
   agents: AgentState[];
   focusedAgentId: string | null;
   dispatch: (action: RuntimeSyncDispatchAction) => void;
@@ -52,6 +58,15 @@ type HistoryCacheEntry = {
   history: DomainAgentHistoryResult;
 };
 
+type ScheduledPrefetchHandle = { kind: "idle"; id: number } | { kind: "timeout"; id: number };
+
+type ScheduledPrefetchEntry = {
+  agentId: string;
+  sessionEpoch: number;
+  targetLimit: number;
+  handle: ScheduledPrefetchHandle;
+};
+
 type HistoryRequestContext = {
   agentId: string;
   sessionKey: string;
@@ -64,6 +79,11 @@ type HistoryRequestContext = {
 const normalizeSessionEpoch = (value: number | undefined): number => {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.trunc(value));
+};
+
+const normalizePositiveInt = (value: number | null | undefined): number | null => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  return Math.max(1, Math.floor(value));
 };
 
 const isAbortError = (error: unknown): boolean => {
@@ -87,8 +107,65 @@ const resolveScanLimitForReason = (params: {
   maxHistoryLimit: number;
 }): number => {
   const floor =
-    params.reason === "bootstrap" ? 200 : params.reason === "load-more" ? 400 : 300;
+    params.reason === "bootstrap"
+      ? 200
+      : params.reason === "load-more" || params.reason === "prefetch"
+        ? 400
+        : 300;
   return Math.min(params.maxHistoryLimit, Math.max(floor, params.requestedLimit * 3));
+};
+
+const buildHistoryMemoryCacheKey = (params: {
+  sessionKey: string;
+  sessionEpoch: number;
+  includeTraceHistory: boolean;
+  includeTools: boolean;
+}): string => {
+  return [
+    params.sessionKey.trim(),
+    String(normalizeSessionEpoch(params.sessionEpoch)),
+    params.includeTraceHistory ? "trace:1" : "trace:0",
+    params.includeTools ? "tools:1" : "tools:0",
+  ].join("\u001f");
+};
+
+const resolveVisibleHistoryLimit = (params: {
+  agent: Pick<AgentState, "historyVisibleTurnLimit" | "historyFetchedCount">;
+  fallback: number;
+}): number => {
+  return (
+    normalizePositiveInt(params.agent.historyVisibleTurnLimit) ??
+    normalizePositiveInt(params.agent.historyFetchedCount) ??
+    Math.max(1, Math.floor(params.fallback))
+  );
+};
+
+const resolveCachedVisibleHistoryLimit = (params: {
+  persistedVisibleTurnLimit: number | null;
+  fetchedCount: number | null;
+  fallback: number;
+  maxVisible: number;
+}): number | null => {
+  const fetchedCount = normalizePositiveInt(params.fetchedCount);
+  if (!fetchedCount) return null;
+  const preferredVisibleTurnLimit =
+    normalizePositiveInt(params.persistedVisibleTurnLimit) ?? Math.max(1, Math.floor(params.fallback));
+  return Math.min(fetchedCount, preferredVisibleTurnLimit, Math.max(1, Math.floor(params.maxVisible)));
+};
+
+const scheduleIdlePrefetch = (callback: () => void): ScheduledPrefetchHandle => {
+  if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+    return { kind: "idle", id: window.requestIdleCallback(() => callback()) };
+  }
+  return { kind: "timeout", id: window.setTimeout(callback, 120) };
+};
+
+const cancelIdlePrefetch = (handle: ScheduledPrefetchHandle): void => {
+  if (handle.kind === "idle" && typeof window !== "undefined" && typeof window.cancelIdleCallback === "function") {
+    window.cancelIdleCallback(handle.id);
+    return;
+  }
+  window.clearTimeout(handle.id);
 };
 
 const FOCUSED_PREVIEW_LIMIT = 50;
@@ -102,12 +179,21 @@ const buildPreviewBootstrapKey = (agent: Pick<AgentState, "sessionKey" | "sessio
 export function useRuntimeSyncController(
   params: UseRuntimeSyncControllerParams
 ): RuntimeSyncController {
-  const { status, agents, focusedAgentId, dispatch, isDisconnectLikeError } = params;
+  const {
+    status,
+    gatewayUrl = "",
+    agents,
+    focusedAgentId,
+    dispatch,
+    isDisconnectLikeError,
+  } = params;
   const agentsRef = useRef(agents);
   const historyInFlightRef = useRef<Set<string>>(new Set());
   const historyAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const historyRequestContextRef = useRef<Map<string, HistoryRequestContext>>(new Map());
   const historyCacheRef = useRef<Map<string, HistoryCacheEntry>>(new Map());
+  const historyPersistedMarkerRef = useRef<Map<string, string>>(new Map());
+  const historyPrefetchRef = useRef<Map<string, ScheduledPrefetchEntry>>(new Map());
   const previewInFlightRef = useRef<Set<string>>(new Set());
   const previewBootstrapAttemptedRef = useRef<Set<string>>(new Set());
 
@@ -118,9 +204,28 @@ export function useRuntimeSyncController(
     agentsRef.current = agents;
   }, [agents]);
 
+  const clearSessionHistoryCache = useCallback((sessionKey: string) => {
+    const normalizedSessionKey = sessionKey.trim();
+    if (!normalizedSessionKey) return;
+    for (const key of historyCacheRef.current.keys()) {
+      if (!key.startsWith(`${normalizedSessionKey}\u001f`)) continue;
+      historyCacheRef.current.delete(key);
+    }
+  }, []);
+
+  const cancelScheduledPrefetch = useCallback((sessionKey: string) => {
+    const normalizedSessionKey = sessionKey.trim();
+    if (!normalizedSessionKey) return;
+    const scheduled = historyPrefetchRef.current.get(normalizedSessionKey) ?? null;
+    if (!scheduled) return;
+    cancelIdlePrefetch(scheduled.handle);
+    historyPrefetchRef.current.delete(normalizedSessionKey);
+  }, []);
+
   const clearHistoryInFlight = useCallback((sessionKey: string) => {
     const key = sessionKey.trim();
     if (!key) return;
+    cancelScheduledPrefetch(key);
     const controller = historyAbortControllersRef.current.get(key) ?? null;
     if (controller) {
       controller.abort();
@@ -128,8 +233,8 @@ export function useRuntimeSyncController(
     }
     historyRequestContextRef.current.delete(key);
     historyInFlightRef.current.delete(key);
-    historyCacheRef.current.delete(key);
-  }, []);
+    clearSessionHistoryCache(key);
+  }, [cancelScheduledPrefetch, clearSessionHistoryCache]);
 
   const loadSummarySnapshot = useCallback(async () => {
     try {
@@ -245,6 +350,12 @@ export function useRuntimeSyncController(
           : defaultHistoryLimit;
       const requestedLimit = Math.max(1, Math.min(maxHistoryLimit, requestedLimitRaw));
       const includeTraceHistory = targetAgent.showThinkingTraces === true;
+      const memoryCacheKey = buildHistoryMemoryCacheKey({
+        sessionKey,
+        sessionEpoch: normalizeSessionEpoch(targetAgent.sessionEpoch),
+        includeTraceHistory,
+        includeTools: includeTraceHistory,
+      });
 
       if (
         reason === "load-more" &&
@@ -261,6 +372,7 @@ export function useRuntimeSyncController(
         return;
       }
 
+      cancelScheduledPrefetch(sessionKey);
       historyInFlightRef.current.add(sessionKey);
       const requestId = randomUUID();
       const loadedAt = Date.now();
@@ -288,9 +400,70 @@ export function useRuntimeSyncController(
       try {
         let history: DomainAgentHistoryResult;
         let fromCache = false;
+        let hydratedFromPersistedCache = false;
         let fetchDurationMs = 0;
+        const shouldHydratePersistedCache =
+          reason !== "load-more" &&
+          targetAgent.historyLoadedAt === null &&
+          gatewayUrl.trim().length > 0;
 
-        const cached = historyCacheRef.current.get(sessionKey);
+        if (shouldHydratePersistedCache) {
+          const cachedWindow = await readCachedHistoryWindow({
+            gatewayUrl,
+            agentId,
+            sessionKey,
+            sessionEpoch,
+            includeThinking: includeTraceHistory,
+            includeTools: includeTraceHistory,
+          });
+          if (cachedWindow) {
+            const latestBeforeCache =
+              agentsRef.current.find((entry) => entry.agentId === agentId) ?? null;
+            if (
+              latestBeforeCache &&
+              latestBeforeCache.sessionKey.trim() === sessionKey &&
+              normalizeSessionEpoch(latestBeforeCache.sessionEpoch) === sessionEpoch &&
+              latestBeforeCache.historyLoadedAt === null
+            ) {
+              const persistedVisibleTurnLimit = resolveCachedVisibleHistoryLimit({
+                persistedVisibleTurnLimit: cachedWindow.historyVisibleTurnLimit,
+                fetchedCount: cachedWindow.historyFetchedCount,
+                fallback: requestedLimit,
+                maxVisible: defaultHistoryLimit,
+              });
+              dispatch({
+                type: "updateAgent",
+                agentId,
+                patch: {
+                  transcriptEntries: cachedWindow.transcriptEntries,
+                  historyLoadedAt: cachedWindow.cachedAt,
+                  historyFetchLimit: cachedWindow.historyFetchLimit,
+                  historyFetchedCount: cachedWindow.historyFetchedCount,
+                  historyVisibleTurnLimit: persistedVisibleTurnLimit,
+                  historyMaybeTruncated: cachedWindow.historyMaybeTruncated,
+                  historyHasMore: cachedWindow.historyHasMore,
+                  historyGatewayCapReached: cachedWindow.historyGatewayCapReached,
+                  lastResult: cachedWindow.lastResult,
+                  latestPreview: cachedWindow.latestPreview,
+                  lastAssistantMessageAt: cachedWindow.lastAssistantMessageAt,
+                  lastUserMessage: cachedWindow.lastUserMessage,
+                },
+              });
+              hydratedFromPersistedCache = true;
+              logTranscriptDebugMetric("history_cache_hydrated", {
+                agentId,
+                sessionKey,
+                requestId,
+                requestedLimit,
+                cachedAt: cachedWindow.cachedAt,
+                cachedFetchedCount: cachedWindow.historyFetchedCount,
+                cachedVisibleTurnLimit: persistedVisibleTurnLimit,
+              });
+            }
+          }
+        }
+
+        const cached = historyCacheRef.current.get(memoryCacheKey);
         const canUseCache =
           reason !== "refresh" &&
           cached &&
@@ -316,7 +489,7 @@ export function useRuntimeSyncController(
             signal: abortController.signal,
           });
           fetchDurationMs = Date.now() - fetchStartedAt;
-          historyCacheRef.current.set(sessionKey, {
+          historyCacheRef.current.set(memoryCacheKey, {
             requestedLimit,
             fetchedAt: Date.now(),
             history,
@@ -372,6 +545,7 @@ export function useRuntimeSyncController(
           requestedLimit,
           requestId,
           fromCache,
+          hydratedFromPersistedCache,
           fetchDurationMs,
           hydrateDurationMs,
           totalDurationMs: Date.now() - requestStartedAt,
@@ -381,6 +555,9 @@ export function useRuntimeSyncController(
           windowTruncated: history.windowTruncated,
           gatewayLimit: history.gatewayLimit,
           gatewayCapped: history.gatewayCapped,
+          routeGatewayDurationMs: history.gatewayDurationMs,
+          routeCacheStatus: history.cacheStatus,
+          routeCacheAgeMs: history.cacheAgeMs,
         });
       } catch (error) {
         if (isAbortError(error)) {
@@ -413,13 +590,54 @@ export function useRuntimeSyncController(
         }
       }
     },
-    [defaultHistoryLimit, dispatch, isDisconnectLikeError, maxHistoryLimit]
+    [
+      cancelScheduledPrefetch,
+      defaultHistoryLimit,
+      dispatch,
+      gatewayUrl,
+      isDisconnectLikeError,
+      maxHistoryLimit,
+    ]
   );
 
   const loadMoreAgentHistory = useCallback(
     (agentId: string) => {
       const agent = agentsRef.current.find((entry) => entry.agentId === agentId) ?? null;
-      if (!agent?.historyMaybeTruncated) return;
+      if (!agent) return;
+
+      const currentVisibleTurnLimit = resolveVisibleHistoryLimit({
+        agent,
+        fallback: defaultHistoryLimit,
+      });
+      const fetchedTurnCount = normalizePositiveInt(agent.historyFetchedCount) ?? 0;
+      const hasHiddenFetchedHistory = fetchedTurnCount > currentVisibleTurnLimit;
+
+      if (hasHiddenFetchedHistory) {
+        const nextVisibleTurnLimit = Math.min(
+          fetchedTurnCount,
+          resolveRuntimeSyncLoadMoreHistoryLimit({
+            currentLimit: currentVisibleTurnLimit,
+            defaultLimit: defaultHistoryLimit,
+            maxLimit: maxHistoryLimit,
+          })
+        );
+        dispatch({
+          type: "updateAgent",
+          agentId,
+          patch: {
+            historyVisibleTurnLimit: nextVisibleTurnLimit,
+          },
+        });
+        logTranscriptDebugMetric("history_load_more_reveal_cached", {
+          agentId,
+          currentVisibleTurnLimit,
+          nextVisibleTurnLimit,
+          fetchedTurnCount,
+        });
+        return;
+      }
+
+      if (!agent.historyMaybeTruncated) return;
       if (agent.historyGatewayCapReached) return;
 
       const nextLimit = resolveRuntimeSyncLoadMoreHistoryLimit({
@@ -483,6 +701,7 @@ export function useRuntimeSyncController(
       if (!focusChanged && !sessionInvalid) continue;
 
       controller.abort();
+      cancelScheduledPrefetch(sessionKey);
       historyAbortControllersRef.current.delete(sessionKey);
       historyRequestContextRef.current.delete(sessionKey);
       historyInFlightRef.current.delete(sessionKey);
@@ -494,20 +713,25 @@ export function useRuntimeSyncController(
         staleCause: sessionInvalid ? "session-invalidated" : "focus-changed",
       });
     }
-  }, [agents, focusedAgentId]);
+  }, [agents, cancelScheduledPrefetch, focusedAgentId]);
 
   useEffect(() => {
     const controllers = historyAbortControllersRef.current;
     const contexts = historyRequestContextRef.current;
     const inFlight = historyInFlightRef.current;
+    const prefetches = historyPrefetchRef.current;
     const previewInFlight = previewInFlightRef.current;
     return () => {
       for (const controller of controllers.values()) {
         controller.abort();
       }
+      for (const scheduled of prefetches.values()) {
+        cancelIdlePrefetch(scheduled.handle);
+      }
       controllers.clear();
       contexts.clear();
       inFlight.clear();
+      prefetches.clear();
       previewInFlight.clear();
     };
   }, []);
@@ -549,6 +773,165 @@ export function useRuntimeSyncController(
       limit: Math.min(defaultHistoryLimit, BOOTSTRAP_HISTORY_LIMIT),
     });
   }, [agents, defaultHistoryLimit, focusedAgentId, loadAgentHistory, status]);
+
+  useEffect(() => {
+    const gatewayCacheKey = gatewayUrl.trim();
+    if (!gatewayCacheKey) return;
+    for (const agent of agents) {
+      const sessionKey = agent.sessionKey.trim();
+      if (!sessionKey) continue;
+      const transcriptEntries = Array.isArray(agent.transcriptEntries) ? agent.transcriptEntries : [];
+      if (transcriptEntries.length === 0) continue;
+      const sessionEpoch = normalizeSessionEpoch(agent.sessionEpoch);
+      const includeThinking = agent.showThinkingTraces === true;
+      const includeTools = agent.showThinkingTraces === true || agent.toolCallingEnabled === true;
+      const cacheKey = buildCachedHistoryWindowKey({
+        gatewayUrl: gatewayCacheKey,
+        agentId: agent.agentId,
+        sessionKey,
+        sessionEpoch,
+        includeThinking,
+        includeTools,
+      });
+      const marker = [
+        String(agent.transcriptRevision ?? 0),
+        String(normalizePositiveInt(agent.historyFetchLimit) ?? 0),
+        String(normalizePositiveInt(agent.historyFetchedCount) ?? 0),
+        String(normalizePositiveInt(agent.historyVisibleTurnLimit) ?? 0),
+        agent.historyMaybeTruncated ? "truncated:1" : "truncated:0",
+        agent.historyHasMore ? "more:1" : "more:0",
+        agent.historyGatewayCapReached ? "capped:1" : "capped:0",
+      ].join("\u001f");
+      if (historyPersistedMarkerRef.current.get(cacheKey) === marker) continue;
+      historyPersistedMarkerRef.current.set(cacheKey, marker);
+      void writeCachedHistoryWindow({
+        gatewayUrl: gatewayCacheKey,
+        agentId: agent.agentId,
+        sessionKey,
+        sessionEpoch,
+        includeThinking,
+        includeTools,
+        cachedAt: Date.now(),
+        transcriptEntries,
+        historyFetchLimit: normalizePositiveInt(agent.historyFetchLimit),
+        historyFetchedCount: normalizePositiveInt(agent.historyFetchedCount),
+        historyVisibleTurnLimit: normalizePositiveInt(agent.historyVisibleTurnLimit),
+        historyMaybeTruncated: agent.historyMaybeTruncated,
+        historyHasMore: agent.historyHasMore ?? false,
+        historyGatewayCapReached: agent.historyGatewayCapReached ?? false,
+        lastResult: agent.lastResult,
+        latestPreview: agent.latestPreview,
+        lastAssistantMessageAt: agent.lastAssistantMessageAt,
+        lastUserMessage: agent.lastUserMessage,
+      });
+    }
+  }, [agents, gatewayUrl]);
+
+  useEffect(() => {
+    const normalizedFocusedAgentId = focusedAgentId?.trim() ?? "";
+    const focusedSessionKey =
+      normalizedFocusedAgentId.length > 0
+        ? agents.find((entry) => entry.agentId === normalizedFocusedAgentId)?.sessionKey.trim() ?? ""
+        : "";
+    for (const [sessionKey, scheduled] of historyPrefetchRef.current.entries()) {
+      if (sessionKey === focusedSessionKey) continue;
+      cancelIdlePrefetch(scheduled.handle);
+      historyPrefetchRef.current.delete(sessionKey);
+    }
+    if (status !== "connected") return;
+    if (!normalizedFocusedAgentId) return;
+    const focusedAgent =
+      agents.find((entry) => entry.agentId === normalizedFocusedAgentId) ?? null;
+    if (!focusedAgent || !focusedAgent.sessionCreated) return;
+    if (!focusedAgent.historyLoadedAt) return;
+    if (focusedAgent.historyGatewayCapReached) return;
+    const sessionKey = focusedAgent.sessionKey.trim();
+    if (!sessionKey) return;
+    const visibleTurnLimit = resolveVisibleHistoryLimit({
+      agent: focusedAgent,
+      fallback: defaultHistoryLimit,
+    });
+    const fetchedTurnCount = normalizePositiveInt(focusedAgent.historyFetchedCount) ?? 0;
+    if (fetchedTurnCount === 0) return;
+    if (fetchedTurnCount > visibleTurnLimit) return;
+    if (!focusedAgent.historyMaybeTruncated) return;
+    const nextLimit = resolveRuntimeSyncLoadMoreHistoryLimit({
+      currentLimit: focusedAgent.historyFetchLimit,
+      defaultLimit: defaultHistoryLimit,
+      maxLimit: maxHistoryLimit,
+    });
+    if (
+      typeof focusedAgent.historyFetchLimit === "number" &&
+      Number.isFinite(focusedAgent.historyFetchLimit) &&
+      nextLimit <= focusedAgent.historyFetchLimit
+    ) {
+      return;
+    }
+    const existingScheduled = historyPrefetchRef.current.get(sessionKey) ?? null;
+    if (
+      existingScheduled &&
+      existingScheduled.targetLimit === nextLimit &&
+      existingScheduled.agentId === focusedAgent.agentId &&
+      existingScheduled.sessionEpoch === normalizeSessionEpoch(focusedAgent.sessionEpoch)
+    ) {
+      return;
+    }
+    if (existingScheduled) {
+      cancelIdlePrefetch(existingScheduled.handle);
+      historyPrefetchRef.current.delete(sessionKey);
+    }
+    const scheduled: ScheduledPrefetchEntry = {
+      agentId: focusedAgent.agentId,
+      sessionEpoch: normalizeSessionEpoch(focusedAgent.sessionEpoch),
+      targetLimit: nextLimit,
+      handle: scheduleIdlePrefetch(() => {
+        const latest =
+          agentsRef.current.find((entry) => entry.agentId === normalizedFocusedAgentId) ?? null;
+        const currentScheduled = historyPrefetchRef.current.get(sessionKey) ?? null;
+        if (currentScheduled?.targetLimit === nextLimit) {
+          historyPrefetchRef.current.delete(sessionKey);
+        }
+        if (!latest || !latest.sessionCreated) return;
+        if (latest.sessionKey.trim() !== sessionKey) return;
+        if (normalizeSessionEpoch(latest.sessionEpoch) !== normalizeSessionEpoch(focusedAgent.sessionEpoch)) {
+          return;
+        }
+        if (latest.historyGatewayCapReached) return;
+        const latestVisibleTurnLimit = resolveVisibleHistoryLimit({
+          agent: latest,
+          fallback: defaultHistoryLimit,
+        });
+        const latestFetchedTurnCount = normalizePositiveInt(latest.historyFetchedCount) ?? 0;
+        if (latestFetchedTurnCount > latestVisibleTurnLimit) return;
+        if (!latest.historyMaybeTruncated) return;
+        if (
+          typeof latest.historyFetchLimit === "number" &&
+          Number.isFinite(latest.historyFetchLimit) &&
+          latest.historyFetchLimit >= nextLimit
+        ) {
+          return;
+        }
+        void loadAgentHistory(normalizedFocusedAgentId, {
+          limit: nextLimit,
+          reason: "prefetch",
+        });
+      }),
+    };
+    historyPrefetchRef.current.set(sessionKey, scheduled);
+    return () => {
+      const current = historyPrefetchRef.current.get(sessionKey) ?? null;
+      if (!current || current.targetLimit !== nextLimit) return;
+      cancelIdlePrefetch(current.handle);
+      historyPrefetchRef.current.delete(sessionKey);
+    };
+  }, [
+    agents,
+    defaultHistoryLimit,
+    focusedAgentId,
+    loadAgentHistory,
+    maxHistoryLimit,
+    status,
+  ]);
 
   return {
     loadSummarySnapshot,

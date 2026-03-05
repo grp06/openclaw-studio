@@ -66,6 +66,7 @@ export type AgentState = AgentStoreSeed & {
   historyLoadedAt: number | null;
   historyFetchLimit: number | null;
   historyFetchedCount: number | null;
+  historyVisibleTurnLimit?: number | null;
   historyMaybeTruncated: boolean;
   historyHasMore?: boolean;
   historyGatewayCapReached?: boolean;
@@ -102,6 +103,7 @@ export const buildNewSessionAgentPatch = (agent: AgentState): Partial<AgentState
     historyLoadedAt: null,
     historyFetchLimit: null,
     historyFetchedCount: null,
+    historyVisibleTurnLimit: null,
     historyMaybeTruncated: false,
     historyHasMore: false,
     historyGatewayCapReached: false,
@@ -224,6 +226,7 @@ const createRuntimeAgentState = (
     historyLoadedAt: sameSessionKey ? (existing?.historyLoadedAt ?? null) : null,
     historyFetchLimit: sameSessionKey ? (existing?.historyFetchLimit ?? null) : null,
     historyFetchedCount: sameSessionKey ? (existing?.historyFetchedCount ?? null) : null,
+    historyVisibleTurnLimit: sameSessionKey ? (existing?.historyVisibleTurnLimit ?? null) : null,
     historyMaybeTruncated: sameSessionKey ? (existing?.historyMaybeTruncated ?? false) : false,
     historyHasMore: sameSessionKey ? (existing?.historyHasMore ?? false) : false,
     historyGatewayCapReached: sameSessionKey

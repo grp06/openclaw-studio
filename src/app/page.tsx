@@ -871,6 +871,7 @@ const AgentStudioPage = () => {
     clearHistoryInFlight,
   } = useRuntimeSyncController({
     status: coreStatus,
+    gatewayUrl,
     agents,
     focusedAgentId,
     dispatch,

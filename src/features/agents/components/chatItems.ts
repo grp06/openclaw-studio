@@ -24,7 +24,7 @@ export type AssistantTraceEvent =
   | { kind: "thinking"; text: string }
   | { kind: "tool"; text: string };
 
-type AgentChatRenderBlock =
+export type AgentChatRenderBlock =
   | { kind: "user"; text: string; timestampMs?: number }
   | {
       kind: "assistant";

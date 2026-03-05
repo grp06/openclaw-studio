@@ -27,6 +27,9 @@ export type DomainAgentHistoryResult = {
   windowTruncated: boolean;
   gatewayLimit: number;
   gatewayCapped: boolean;
+  gatewayDurationMs?: number;
+  cacheStatus?: "hit" | "miss" | "coalesced";
+  cacheAgeMs?: number | null;
   freshness?: unknown;
   error?: string;
 };

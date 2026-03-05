@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ChangeEvent,
   type KeyboardEvent,
   type MutableRefObject,
@@ -24,15 +25,19 @@ import type {
   PendingExecApproval,
 } from "@/features/agents/approvals/types";
 import {
-  boundChatItemsBySemanticTurns,
   buildAgentChatRenderBlocks,
   buildFinalAgentChatItems,
   DEFAULT_SEMANTIC_RENDER_TURN_LIMIT,
   summarizeToolLabel,
   type AssistantTraceEvent,
-  type AgentChatItem,
+  type AgentChatRenderBlock,
 } from "./chatItems";
-import { logTranscriptDebugMetric } from "@/features/agents/state/transcript";
+import {
+  boundTranscriptEntriesBySemanticTurns,
+  buildOutputLinesFromTranscriptEntries,
+  buildTranscriptEntriesFromLines,
+  logTranscriptDebugMetric,
+} from "@/features/agents/state/transcript";
 import {
   buildChatFirstPaintCycleKey,
   resolveChatFirstPaint,
@@ -58,6 +63,10 @@ const ASSISTANT_GUTTER_CLASS = "pl-[44px]";
 const ASSISTANT_MAX_WIDTH_DEFAULT_CLASS = "max-w-[68ch]";
 const ASSISTANT_MAX_WIDTH_EXPANDED_CLASS = "max-w-[1120px]";
 const CHAT_TOP_THRESHOLD_PX = 8;
+const MESSAGE_CONTENT_VISIBILITY_STYLE: CSSProperties = {
+  contentVisibility: "auto",
+  containIntrinsicSize: "220px",
+};
 const EMPTY_CHAT_INTRO_MESSAGES = [
   "How can I help you today?",
   "What should we accomplish today?",
@@ -350,6 +359,7 @@ const UserMessageCard = memo(function UserMessageCard({
   return (
     <div
       className="ui-chat-user-card w-full max-w-[70ch] self-end overflow-hidden rounded-[var(--radius-small)] bg-[color:var(--chat-user-bg)]"
+      style={MESSAGE_CONTENT_VISIBILITY_STYLE}
       {...(testId ? { "data-testid": testId } : {})}
     >
       <div className="flex items-center justify-between gap-3 bg-[color:var(--chat-user-header-bg)] px-3 py-2 dark:px-3.5 dark:py-2.5">
@@ -407,7 +417,11 @@ const AssistantMessageCard = memo(function AssistantMessageCard({
   const compactStreamingIndicator = Boolean(streaming && !hasThinking && !hasContent);
 
   return (
-    <div className="w-full self-start" {...(testId ? { "data-testid": testId } : {})}>
+    <div
+      className="w-full self-start"
+      style={MESSAGE_CONTENT_VISIBILITY_STYLE}
+      {...(testId ? { "data-testid": testId } : {})}
+    >
       <div className={`relative w-full ${widthClass} ${ASSISTANT_GUTTER_CLASS}`}>
         <div className="absolute left-[4px] top-[2px]">
           <AgentAvatar seed={avatarSeed} name={name} avatarUrl={avatarUrl} size={22} />
@@ -548,7 +562,7 @@ const AgentChatFinalItems = memo(function AgentChatFinalItems({
   name,
   avatarSeed,
   avatarUrl,
-  chatItems,
+  renderBlocks,
   running,
   runStartedAt,
 }: {
@@ -556,15 +570,13 @@ const AgentChatFinalItems = memo(function AgentChatFinalItems({
   name: string;
   avatarSeed: string;
   avatarUrl: string | null;
-  chatItems: AgentChatItem[];
+  renderBlocks: AgentChatRenderBlock[];
   running: boolean;
   runStartedAt: number | null;
 }) {
-  const blocks = buildAgentChatRenderBlocks(chatItems);
-
   return (
     <>
-      {blocks.map((block, index) => {
+      {renderBlocks.map((block, index) => {
         if (block.kind === "user") {
           return (
             <UserMessageCard
@@ -574,7 +586,7 @@ const AgentChatFinalItems = memo(function AgentChatFinalItems({
             />
           );
         }
-        const streaming = running && index === blocks.length - 1 && !block.text;
+        const streaming = running && index === renderBlocks.length - 1 && !block.text;
         return (
           <AssistantMessageCard
             key={`chat-${agentId}-assistant-${index}`}
@@ -602,8 +614,9 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
   historyMaybeTruncated,
   historyGatewayCapReached,
   historyFetchedCount,
+  historyVisibleTurnLimit,
   onLoadMoreHistory,
-  chatItems,
+  renderBlocks,
   liveThinkingText,
   liveAssistantText,
   showTypingIndicator,
@@ -627,8 +640,9 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
   historyMaybeTruncated: boolean;
   historyGatewayCapReached: boolean;
   historyFetchedCount: number | null;
+  historyVisibleTurnLimit: number | null;
   onLoadMoreHistory: () => void;
-  chatItems: AgentChatItem[];
+  renderBlocks: AgentChatRenderBlock[];
   liveThinkingText: string;
   liveAssistantText: string;
   showTypingIndicator: boolean;
@@ -736,7 +750,18 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
   const showLiveAssistantCard =
     status === "running" && Boolean(liveThinkingText || liveAssistantText || showTypingIndicator);
   const hasApprovals = pendingExecApprovals.length > 0;
-  const hasTranscriptItems = chatItems.length > 0;
+  const hasTranscriptItems = renderBlocks.length > 0;
+  const visibleTurnCount =
+    typeof historyVisibleTurnLimit === "number" && Number.isFinite(historyVisibleTurnLimit)
+      ? historyVisibleTurnLimit
+      : historyFetchedCount;
+  const hasHiddenFetchedHistory =
+    typeof historyFetchedCount === "number" &&
+    Number.isFinite(historyFetchedCount) &&
+    typeof visibleTurnCount === "number" &&
+    Number.isFinite(visibleTurnCount) &&
+    historyFetchedCount > visibleTurnCount;
+  const showLoadMoreBanner = (historyMaybeTruncated || hasHiddenFetchedHistory) && isAtTop;
   const provisionalConversationItems = (() => {
     const normalizedPreviewItems = (previewItems ?? [])
       .map((item) => ({
@@ -810,12 +835,14 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
       >
         <div className="relative flex flex-col gap-6 dark:gap-8 text-[14px] leading-[1.65] text-foreground">
           <div aria-hidden className={`pointer-events-none absolute ${SPINE_LEFT} top-0 bottom-0 w-px bg-border/20`} />
-          {historyMaybeTruncated && isAtTop ? (
+          {showLoadMoreBanner ? (
             <div className="-mx-1 flex items-center justify-between gap-3 rounded-md bg-surface-2 px-3 py-2 shadow-2xs">
               <div className="type-meta min-w-0 truncate font-mono text-muted-foreground">
-                Showing latest {typeof historyFetchedCount === "number" ? historyFetchedCount : "?"} turns
+                {hasHiddenFetchedHistory && typeof historyFetchedCount === "number" && typeof visibleTurnCount === "number"
+                  ? `Showing latest ${visibleTurnCount} of ${historyFetchedCount} loaded turns`
+                  : `Showing latest ${typeof visibleTurnCount === "number" ? visibleTurnCount : "?"} turns`}
               </div>
-              {historyGatewayCapReached ? (
+              {historyGatewayCapReached && !hasHiddenFetchedHistory ? (
                 <div className="type-meta shrink-0 font-mono text-muted-foreground">
                   Showing latest retrievable history
                 </div>
@@ -825,7 +852,7 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
                   className="shrink-0 rounded-md border border-border/70 bg-surface-3 px-3 py-1.5 font-mono text-[12px] font-medium tracking-[0.02em] text-foreground transition hover:bg-surface-2"
                   onClick={onLoadMoreHistory}
                 >
-                  Load more
+                  {hasHiddenFetchedHistory ? "Show older" : "Load more"}
                 </button>
               )}
             </div>
@@ -845,7 +872,7 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
                   name={name}
                   avatarSeed={avatarSeed}
                   avatarUrl={avatarUrl}
-                  chatItems={chatItems}
+                  renderBlocks={renderBlocks}
                   running={status === "running"}
                   runStartedAt={runStartedAt}
                 />
@@ -1340,27 +1367,41 @@ export const AgentChatPanel = ({
     [canSend, onDraftChange, onSend]
   );
 
+  const visibleTranscriptEntries = useMemo(
+    () => {
+      const transcriptEntries =
+        agent.transcriptEntries ??
+        buildTranscriptEntriesFromLines({
+          lines: agent.outputLines,
+          sessionKey: agent.sessionKey,
+          source: "legacy",
+          startSequence: 0,
+          confirmed: true,
+        });
+      return boundTranscriptEntriesBySemanticTurns({
+        entries: transcriptEntries,
+        turnLimit: agent.historyVisibleTurnLimit ?? DEFAULT_SEMANTIC_RENDER_TURN_LIMIT,
+      });
+    },
+    [agent.historyVisibleTurnLimit, agent.outputLines, agent.sessionKey, agent.transcriptEntries]
+  );
+  const visibleOutputLines = useMemo(
+    () => buildOutputLinesFromTranscriptEntries(visibleTranscriptEntries),
+    [visibleTranscriptEntries]
+  );
   const chatItems = useMemo(
     () =>
       buildFinalAgentChatItems({
-        outputLines: agent.outputLines,
+        outputLines: visibleOutputLines,
         showThinkingTraces: agent.showThinkingTraces,
         toolCallingEnabled: agent.toolCallingEnabled,
       }),
-    [agent.outputLines, agent.showThinkingTraces, agent.toolCallingEnabled]
-  );
-  const visibleChatItems = useMemo(
-    () =>
-      boundChatItemsBySemanticTurns({
-        items: chatItems,
-        turnLimit: DEFAULT_SEMANTIC_RENDER_TURN_LIMIT,
-      }),
-    [chatItems]
+    [agent.showThinkingTraces, agent.toolCallingEnabled, visibleOutputLines]
   );
   useEffect(() => {
     const cycle = firstPaintCycleRef.current;
     const resolution = resolveChatFirstPaint({
-      transcriptItemCount: visibleChatItems.length,
+      transcriptItemCount: chatItems.length,
       lastUserMessage: agent.lastUserMessage,
       latestPreview: agent.latestPreview,
       agentId: agent.agentId,
@@ -1379,7 +1420,7 @@ export const AgentChatPanel = ({
       sessionEpoch: agent.sessionEpoch ?? 0,
       source: resolution.source,
       elapsedMs: resolution.elapsedMs,
-      transcriptItemCount: visibleChatItems.length,
+      transcriptItemCount: chatItems.length,
       hasLastUserMessage: resolution.hasLastUserMessage,
       hasLatestPreview: resolution.hasLatestPreview,
     });
@@ -1389,12 +1430,12 @@ export const AgentChatPanel = ({
     agent.latestPreview,
     agent.sessionEpoch,
     agent.sessionKey,
-    visibleChatItems.length,
+    chatItems.length,
   ]);
   const running = agent.status === "running";
   const renderBlocks = useMemo(
-    () => buildAgentChatRenderBlocks(visibleChatItems),
-    [visibleChatItems]
+    () => buildAgentChatRenderBlocks(chatItems),
+    [chatItems]
   );
   const hasActiveStreamingTailInTranscript =
     running && renderBlocks.length > 0 && !renderBlocks[renderBlocks.length - 1].text;
@@ -1679,12 +1720,13 @@ export const AgentChatPanel = ({
           historyMaybeTruncated={agent.historyMaybeTruncated}
           historyGatewayCapReached={agent.historyGatewayCapReached ?? false}
           historyFetchedCount={agent.historyFetchedCount}
+          historyVisibleTurnLimit={agent.historyVisibleTurnLimit ?? null}
           onLoadMoreHistory={onLoadMoreHistory}
-          chatItems={visibleChatItems}
+          renderBlocks={renderBlocks}
           liveThinkingText={liveThinkingText}
           liveAssistantText={liveAssistantText}
           showTypingIndicator={showTypingIndicator}
-          outputLineCount={agent.outputLines.length}
+          outputLineCount={visibleOutputLines.length}
           liveAssistantCharCount={liveAssistantText.length}
           liveThinkingCharCount={liveThinkingText.length}
           runStartedAt={agent.runStartedAt}
