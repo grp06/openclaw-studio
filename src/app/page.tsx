@@ -78,6 +78,10 @@ import {
 } from "@/features/agents/operations/latestUpdateWorkflow";
 import { createSpecialLatestUpdateOperation } from "@/features/agents/operations/specialLatestUpdateOperation";
 import {
+  decideInTabNotificationIntents,
+  type InTabNotificationState,
+} from "@/features/agents/operations/inTabNotificationsWorkflow";
+import {
   resolveAgentPermissionsDraft,
 } from "@/features/agents/operations/agentPermissionsOperation";
 import {
@@ -116,6 +120,14 @@ import { useSettingsRouteController } from "@/features/agents/operations/useSett
 const PENDING_EXEC_APPROVAL_PRUNE_GRACE_MS = 500;
 
 type MobilePane = "fleet" | "chat";
+const SETTINGS_SIDEBAR_ENTRIES = [
+  { id: "personality", label: "Behavior" },
+  { id: "capabilities", label: "Capabilities" },
+  { id: "skills", label: "Skills" },
+  { id: "system", label: "System setup" },
+  { id: "automations", label: "Automations" },
+  { id: "advanced", label: "Advanced" },
+] as const;
 type SettingsSidebarItem = SettingsRouteTab;
 
 const RESERVED_MAIN_AGENT_ID = "main";
@@ -243,6 +255,7 @@ const AgentStudioPage = () => {
   const [createAgentModalOpen, setCreateAgentModalOpen] = useState(false);
   const [createAgentModalError, setCreateAgentModalError] = useState<string | null>(null);
   const [mobilePane, setMobilePane] = useState<MobilePane>("chat");
+  const [mobileSettingsMenuOpen, setMobileSettingsMenuOpen] = useState(false);
   const [inspectSidebar, setInspectSidebar] = useState<InspectSidebarState>(null);
   const [systemInitialSkillKey, setSystemInitialSkillKey] = useState<string | null>(null);
   const [personalityHasUnsavedChanges, setPersonalityHasUnsavedChanges] = useState(false);
@@ -271,6 +284,13 @@ const AgentStudioPage = () => {
     }) => Promise<void>
   >((input) => Promise.reject(new Error(`Config mutation queue not ready for "${input.kind}".`)));
   const approvalPausedRunIdByAgentRef = useRef<Map<string, string>>(new Map());
+  const notificationsPrimedRef = useRef(false);
+  const [inTabNotificationsEnabled] = useState(true);
+  const lastInTabNotificationStateRef = useRef<InTabNotificationState>({
+    focusedAgentId: null,
+    focusedAgentStatus: null,
+    focusedApprovalCount: 0,
+  });
 
   const agents = state.agents;
   const selectedAgent = useMemo(() => getSelectedAgent(state), [state]);
@@ -300,6 +320,10 @@ const AgentStudioPage = () => {
   useEffect(() => {
     setSettingsSidebarItem(effectiveSettingsTab);
   }, [effectiveSettingsTab]);
+
+  useEffect(() => {
+    setMobileSettingsMenuOpen(false);
+  }, [effectiveSettingsTab, settingsRouteAgentId, settingsRouteActive]);
   const inspectSidebarAgent = useMemo(() => {
     if (!inspectSidebarAgentId) return null;
     return agents.find((entry) => entry.agentId === inspectSidebarAgentId) ?? null;
@@ -376,6 +400,51 @@ const AgentStudioPage = () => {
       unscopedApprovals: unscopedPendingExecApprovals,
     });
   }, [focusedAgentId, pendingExecApprovalsByAgentId, unscopedPendingExecApprovals]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (notificationsPrimedRef.current) return;
+    if (status !== "connected") return;
+    notificationsPrimedRef.current = true;
+    if (Notification.permission === "default") {
+      void Notification.requestPermission();
+    }
+  }, [status]);
+
+  useEffect(() => {
+    const currentState: InTabNotificationState = {
+      focusedAgentId: focusedAgent?.agentId ?? null,
+      focusedAgentStatus: focusedAgent?.status ?? null,
+      focusedApprovalCount: focusedPendingExecApprovals.length,
+    };
+    const previousState = lastInTabNotificationStateRef.current;
+    lastInTabNotificationStateRef.current = currentState;
+
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+
+    const intents = decideInTabNotificationIntents({
+      previous: previousState,
+      current: currentState,
+      focusedAgentName: focusedAgent?.name ?? null,
+      enabled: inTabNotificationsEnabled,
+      permission: Notification.permission,
+    });
+
+    for (const intent of intents) {
+      if (intent.kind === "notify-run-finished") {
+        new Notification(`${intent.agentName} finished`, {
+          body: "Run completed. Open Studio to review the latest reply.",
+          tag: `agent-finished:${intent.agentId}`,
+        });
+        continue;
+      }
+      new Notification(`${intent.agentName} needs approval`, {
+        body: "An execution approval request is waiting in chat.",
+        tag: `agent-approval:${intent.agentId}`,
+      });
+    }
+  }, [focusedAgent, focusedPendingExecApprovals.length, inTabNotificationsEnabled]);
+
   const suggestedCreateAgentName = useMemo(() => {
     try {
       return resolveNextNewAgentName(state.agents);
@@ -1277,8 +1346,8 @@ const AgentStudioPage = () => {
 
   if (!agentsLoadedOnce && (!didAttemptGatewayConnect || status === "connecting")) {
     return (
-      <div className="relative min-h-screen w-screen overflow-hidden bg-background">
-        <div className="flex min-h-screen items-center justify-center px-6">
+      <div className="relative min-h-dvh w-screen overflow-hidden bg-background">
+        <div className="flex min-h-dvh items-center justify-center px-6">
           <div className="glass-panel ui-panel w-full max-w-md px-6 py-6 text-center">
             <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
               OpenClaw Studio
@@ -1294,8 +1363,8 @@ const AgentStudioPage = () => {
 
   if (status === "disconnected" && !agentsLoadedOnce && didAttemptGatewayConnect) {
     return (
-      <div className="relative min-h-screen w-screen overflow-hidden bg-background">
-        <div className="relative z-10 flex h-screen flex-col">
+      <div className="relative min-h-dvh w-screen overflow-hidden bg-background">
+        <div className="relative z-10 flex h-dvh flex-col">
           <HeaderBar
             status={status}
             onConnectionSettings={() => setShowConnectionPanel(true)}
@@ -1331,8 +1400,8 @@ const AgentStudioPage = () => {
 
   if (status === "connected" && !agentsLoadedOnce) {
     return (
-      <div className="relative min-h-screen w-screen overflow-hidden bg-background">
-        <div className="flex min-h-screen items-center justify-center px-6">
+      <div className="relative min-h-dvh w-screen overflow-hidden bg-background">
+        <div className="flex min-h-dvh items-center justify-center px-6">
           <div className="glass-panel ui-panel w-full max-w-md px-6 py-6 text-center">
             <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
               OpenClaw Studio
@@ -1345,7 +1414,7 @@ const AgentStudioPage = () => {
   }
 
   return (
-    <div className="relative min-h-screen w-screen overflow-hidden bg-background">
+    <div className="relative min-h-dvh w-screen overflow-hidden bg-background">
       {state.loading ? (
         <div className="pointer-events-none fixed bottom-4 left-0 right-0 z-50 flex justify-center px-3">
           <div className="glass-panel ui-card px-6 py-3 font-mono text-[11px] tracking-[0.08em] text-muted-foreground">
@@ -1353,7 +1422,7 @@ const AgentStudioPage = () => {
           </div>
         </div>
       ) : null}
-      <div className="relative z-10 flex h-screen flex-col">
+      <div className="relative z-10 flex h-dvh flex-col">
         <HeaderBar
           status={status}
           onConnectionSettings={() => setShowConnectionPanel(true)}
@@ -1397,7 +1466,7 @@ const AgentStudioPage = () => {
               className="ui-panel ui-depth-workspace flex min-h-0 flex-1 overflow-hidden"
               data-testid="agent-settings-route-panel"
             >
-              <aside className="w-[240px] shrink-0 border-r border-border/60">
+              <aside className="hidden w-[240px] shrink-0 border-r border-border/60 md:block">
                 <div className="border-b border-border/60 px-4 py-3">
                   <button
                     type="button"
@@ -1408,16 +1477,7 @@ const AgentStudioPage = () => {
                   </button>
                 </div>
                 <nav className="py-3">
-                  {(
-                    [
-                      { id: "personality", label: "Behavior" },
-                      { id: "capabilities", label: "Capabilities" },
-                      { id: "skills", label: "Skills" },
-                      { id: "system", label: "System setup" },
-                      { id: "automations", label: "Automations" },
-                      { id: "advanced", label: "Advanced" },
-                    ] as const
-                  ).map((entry) => {
+                  {SETTINGS_SIDEBAR_ENTRIES.map((entry) => {
                     const active = activeSettingsSidebarItem === entry.id;
                     return (
                       <button
@@ -1446,7 +1506,54 @@ const AgentStudioPage = () => {
                 </nav>
               </aside>
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <div className="flex items-start justify-between border-b border-border/60 px-6 py-4">
+                <div className="border-b border-border/60 px-3 py-3 md:hidden">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="ui-btn-secondary px-3 py-1.5 font-mono text-[10px] font-semibold tracking-[0.06em]"
+                      onClick={handleBackToChat}
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-btn-secondary ml-auto px-3 py-1.5 font-mono text-[10px] font-semibold tracking-[0.06em]"
+                      aria-label="Open settings menu"
+                      aria-expanded={mobileSettingsMenuOpen}
+                      onClick={() => {
+                        setMobileSettingsMenuOpen((current) => !current);
+                      }}
+                    >
+                      ☰ Menu
+                    </button>
+                  </div>
+                  {mobileSettingsMenuOpen ? (
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {SETTINGS_SIDEBAR_ENTRIES.map((entry) => {
+                        const active = activeSettingsSidebarItem === entry.id;
+                        return (
+                          <button
+                            key={`mobile-settings-${entry.id}`}
+                            type="button"
+                            className={`rounded-md border px-2 py-1.5 text-left text-[12px] transition ${
+                              active
+                                ? "border-primary/40 bg-primary/12 text-foreground"
+                                : "border-border/70 bg-surface-1 text-muted-foreground hover:text-foreground"
+                            }`}
+                            onClick={() => {
+                              setSettingsSidebarItem(entry.id);
+                              handleSettingsRouteTabChange(entry.id);
+                              setMobileSettingsMenuOpen(false);
+                            }}
+                          >
+                            {entry.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex flex-col gap-2 border-b border-border/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:py-4">
                   <div>
                     <div className="text-lg font-semibold text-foreground">
                       {inspectSidebarAgent?.name ?? settingsRouteAgentId ?? "Agent settings"}
@@ -1471,7 +1578,7 @@ const AgentStudioPage = () => {
                         onUnsavedChangesChange={setPersonalityHasUnsavedChanges}
                       />
                     ) : (
-                      <div className="h-full overflow-y-auto px-6 py-6">
+                      <div className="h-full overflow-y-auto px-3 py-4 sm:px-6 sm:py-6">
                         <div className="mx-auto w-full max-w-[920px]">
                           <AgentSettingsPanel
                             key={`${inspectSidebarAgent.agentId}:${effectiveSettingsTab}`}

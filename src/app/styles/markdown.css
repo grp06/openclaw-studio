@@ -107,6 +107,7 @@
   font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
   font-size: 0.82em;
+  white-space: break-spaces;
   overflow-wrap: anywhere;
   word-break: break-word;
   background: color-mix(in oklch, var(--surface-3) 92%, transparent);
@@ -116,12 +117,21 @@
 }
 
 .agent-markdown pre {
+  max-width: 100%;
+  min-width: 0;
   background: color-mix(in oklch, var(--surface-2) 94%, transparent);
   border-radius: 0.4rem;
   padding: 0.75rem 0.85rem;
   border: 1px solid color-mix(in oklch, var(--surface-selected-border) 82%, transparent);
   overflow-x: auto;
   line-height: 1.64;
+}
+
+.agent-markdown pre,
+.agent-markdown pre code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .agent-markdown pre code {
@@ -145,7 +155,12 @@
 }
 
 .agent-markdown table {
-  width: 100%;
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   border-collapse: collapse;
   font-size: 0.85em;
 }

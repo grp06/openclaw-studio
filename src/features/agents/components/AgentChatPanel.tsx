@@ -13,7 +13,7 @@ import {
 import type { AgentState as AgentRecord } from "@/features/agents/state/store";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, ChevronRight, Clock, Cog, Pencil, Shuffle, Trash2, X } from "lucide-react";
+import { Check, ChevronRight, Clock, Cog, Maximize2, Pencil, Shuffle, Trash2, X } from "lucide-react";
 import type { GatewayModelChoice } from "@/lib/gateway/models";
 import { rewriteMediaLinesToMarkdown } from "@/lib/text/media-markdown";
 import { normalizeAssistantDisplayText } from "@/lib/text/assistantText";
@@ -634,7 +634,7 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
 
   const scrollChatToBottom = useCallback(() => {
     if (!chatRef.current) return;
-    if (chatBottomRef.current) {
+    if (chatBottomRef.current && typeof chatBottomRef.current.scrollIntoView === "function") {
       chatBottomRef.current.scrollIntoView({ block: "end" });
       return;
     }
@@ -731,11 +731,11 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
   }, [runStartedAt, showLiveAssistantCard, status]);
 
   return (
-    <div className="relative flex-1 overflow-hidden">
+    <div className="relative h-full min-h-0 overflow-hidden">
       <div
         ref={chatRef}
         data-testid="agent-chat-scroll"
-        className={`ui-chat-scroll ui-chat-scroll-borderless h-full overflow-auto p-4 dark:p-6 sm:p-5 dark:sm:p-7 ${showJumpToLatest ? "pb-20" : ""}`}
+        className={`ui-chat-scroll ui-chat-scroll-borderless h-full overflow-x-hidden overflow-y-auto p-3 sm:p-5 dark:sm:p-7 ${showJumpToLatest ? "pb-20" : ""}`}
         onScroll={() => updatePinnedFromScroll()}
         onWheel={(event) => {
           event.stopPropagation();
@@ -744,11 +744,11 @@ const AgentChatTranscript = memo(function AgentChatTranscript({
           event.stopPropagation();
         }}
       >
-        <div className="relative flex flex-col gap-6 dark:gap-8 text-[14px] leading-[1.65] text-foreground">
+        <div className="relative flex min-w-0 flex-col gap-6 text-[14px] leading-[1.65] text-foreground dark:gap-8">
           <div aria-hidden className={`pointer-events-none absolute ${SPINE_LEFT} top-0 bottom-0 w-px bg-border/20`} />
           {historyMaybeTruncated && isAtTop ? (
-            <div className="-mx-1 flex items-center justify-between gap-3 rounded-md bg-surface-2 px-3 py-2 shadow-2xs">
-              <div className="type-meta min-w-0 truncate font-mono text-muted-foreground">
+            <div className="flex flex-col items-start gap-2 rounded-md bg-surface-2 px-3 py-2 shadow-2xs sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+              <div className="type-meta w-full min-w-0 break-words font-mono text-muted-foreground sm:truncate">
                 Showing most recent {typeof historyFetchedCount === "number" ? historyFetchedCount : "?"} messages
                 {typeof historyFetchLimit === "number" ? ` (limit ${historyFetchLimit})` : ""}
               </div>
@@ -870,6 +870,8 @@ const AgentChatComposer = memo(function AgentChatComposer({
   showThinkingTraces,
   onToolCallingToggle,
   onThinkingTracesToggle,
+  voiceEnabled,
+  onVoiceToggle,
 }: {
   value: string;
   onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
@@ -894,6 +896,8 @@ const AgentChatComposer = memo(function AgentChatComposer({
   showThinkingTraces: boolean;
   onToolCallingToggle: (enabled: boolean) => void;
   onThinkingTracesToggle: (enabled: boolean) => void;
+  voiceEnabled: boolean;
+  onVoiceToggle: (enabled: boolean) => void;
 }) {
   const stopReason = stopDisabledReason?.trim() ?? "";
   const stopDisabled = !canSend || stopBusy || Boolean(stopReason);
@@ -902,7 +906,7 @@ const AgentChatComposer = memo(function AgentChatComposer({
     if (modelOptions.length === 0) return "No models found";
     return modelOptions.find((option) => option.value === modelValue)?.label ?? modelValue;
   }, [modelOptions, modelValue]);
-  const modelSelectWidthCh = Math.max(11, Math.min(44, modelSelectedLabel.length + 6));
+  const modelSelectWidthCh = Math.max(11, Math.min(30, modelSelectedLabel.length + 6));
   const thinkingSelectedLabel = useMemo(() => {
     switch (thinkingValue) {
       case "off":
@@ -921,9 +925,9 @@ const AgentChatComposer = memo(function AgentChatComposer({
         return "Default";
     }
   }, [thinkingValue]);
-  const thinkingSelectWidthCh = Math.max(9, Math.min(22, thinkingSelectedLabel.length + 6));
+  const thinkingSelectWidthCh = Math.max(9, Math.min(16, thinkingSelectedLabel.length + 6));
   return (
-    <div className="rounded-2xl border border-border/65 bg-surface-2/45 px-3 py-2">
+    <div className="w-full max-w-full overflow-hidden rounded-2xl border border-border/65 bg-surface-2/45 px-3 py-2">
       {queuedMessages.length > 0 ? (
         <div
           className={`mb-2 grid items-start gap-2 ${
@@ -983,12 +987,12 @@ const AgentChatComposer = memo(function AgentChatComposer({
           </button>
         </div>
       ) : null}
-      <div className="flex items-end gap-2">
+      <div className="flex min-w-0 items-end gap-2">
         <textarea
           ref={inputRef}
           rows={1}
           value={value}
-          className="chat-composer-input min-h-[28px] flex-1 resize-none border-0 bg-transparent px-0 py-1 text-[15px] leading-6 text-foreground outline-none shadow-none transition placeholder:text-muted-foreground/65 focus:outline-none focus-visible:outline-none focus-visible:ring-0"
+          className="chat-composer-input min-h-[28px] max-h-[34vh] min-w-0 flex-1 resize-none border-0 bg-transparent px-0 py-1 text-[16px] leading-6 text-foreground outline-none shadow-none transition placeholder:text-muted-foreground/65 focus:outline-none focus-visible:outline-none focus-visible:ring-0 sm:text-[15px]"
           onChange={onChange}
           onKeyDown={onKeyDown}
           placeholder="type a message"
@@ -996,7 +1000,7 @@ const AgentChatComposer = memo(function AgentChatComposer({
         {running ? (
           <span className="inline-flex" title={stopReason || undefined}>
             <button
-              className="rounded-md border border-border/70 bg-surface-3 px-3 py-2 font-mono text-[12px] font-medium tracking-[0.02em] text-foreground transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
+              className="shrink-0 rounded-md border border-border/70 bg-surface-3 px-3.5 py-2.5 font-mono text-[12px] font-medium tracking-[0.02em] text-foreground transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground sm:px-3 sm:py-2"
               type="button"
               onClick={onStop}
               disabled={stopDisabled}
@@ -1007,7 +1011,7 @@ const AgentChatComposer = memo(function AgentChatComposer({
           </span>
         ) : null}
         <button
-          className="ui-btn-primary ui-btn-send px-3 py-2 font-mono text-[12px] font-medium tracking-[0.02em] disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
+          className="ui-btn-primary ui-btn-send shrink-0 px-3.5 py-2.5 font-mono text-[12px] font-medium tracking-[0.02em] disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground sm:px-3 sm:py-2"
           type="button"
           onClick={onSend}
           disabled={sendDisabled}
@@ -1015,14 +1019,14 @@ const AgentChatComposer = memo(function AgentChatComposer({
           Send
         </button>
       </div>
-      <div className="mt-1 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
+      <div className="mt-2 flex flex-col gap-2 sm:mt-1 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
           <InlineHoverTooltip text="Choose model">
             <select
-              className="ui-input ui-control-important h-6 min-w-0 rounded-md px-1.5 text-[10px] font-semibold text-foreground"
+              className="ui-input ui-control-important h-6 min-w-0 max-w-full rounded-md px-1.5 text-[10px] font-semibold text-foreground"
               aria-label="Model"
               value={modelValue}
-              style={{ width: `${modelSelectWidthCh}ch` }}
+              style={{ width: `${modelSelectWidthCh}ch`, maxWidth: "clamp(12ch, 58vw, 30ch)" }}
               onChange={(event) => {
                 const nextValue = event.target.value.trim();
                 onModelChange(nextValue ? nextValue : null);
@@ -1042,10 +1046,10 @@ const AgentChatComposer = memo(function AgentChatComposer({
           {allowThinking ? (
             <InlineHoverTooltip text="Select reasoning effort">
               <select
-                className="ui-input ui-control-important h-6 rounded-md px-1.5 text-[10px] font-semibold text-foreground"
+                className="ui-input ui-control-important h-6 min-w-0 max-w-full rounded-md px-1.5 text-[10px] font-semibold text-foreground"
                 aria-label="Thinking"
                 value={thinkingValue}
-                style={{ width: `${thinkingSelectWidthCh}ch` }}
+                style={{ width: `${thinkingSelectWidthCh}ch`, maxWidth: "min(40vw, 16ch)" }}
                 onChange={(event) => {
                   const nextValue = event.target.value.trim();
                   onThinkingChange(nextValue ? nextValue : null);
@@ -1062,14 +1066,28 @@ const AgentChatComposer = memo(function AgentChatComposer({
             </InlineHoverTooltip>
           ) : null}
         </div>
-        <div className="ml-auto flex items-center gap-1.5 text-[10px] text-muted-foreground">
+        <div className="flex w-full flex-wrap items-center justify-end gap-1.5 text-[10px] text-muted-foreground sm:ml-auto sm:w-auto sm:flex-nowrap">
+          <button
+            type="button"
+            role="switch"
+            aria-label={voiceEnabled ? "Turn voice off" : "Turn voice on"}
+            aria-checked={voiceEnabled}
+            className={`inline-flex h-5 shrink-0 items-center rounded-sm border px-1.5 font-mono text-[10px] tracking-[0.01em] transition ${
+              voiceEnabled
+                ? "border-primary/45 bg-primary/14 text-foreground"
+                : "border-border/70 bg-surface-2/40 text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => onVoiceToggle(!voiceEnabled)}
+          >
+            Voice
+          </button>
           <span className="font-mono tracking-[0.02em]">Show</span>
           <button
             type="button"
             role="switch"
             aria-label="Show tool calls"
             aria-checked={toolCallingEnabled}
-            className={`inline-flex h-5 items-center rounded-sm border px-1.5 font-mono text-[10px] tracking-[0.01em] transition ${
+            className={`inline-flex h-5 shrink-0 items-center rounded-sm border px-1.5 font-mono text-[10px] tracking-[0.01em] transition ${
               toolCallingEnabled
                 ? "border-primary/45 bg-primary/14 text-foreground"
                 : "border-border/70 bg-surface-2/40 text-muted-foreground hover:text-foreground"
@@ -1083,7 +1101,7 @@ const AgentChatComposer = memo(function AgentChatComposer({
             role="switch"
             aria-label="Show thinking"
             aria-checked={showThinkingTraces}
-            className={`inline-flex h-5 items-center rounded-sm border px-1.5 font-mono text-[10px] tracking-[0.01em] transition ${
+            className={`inline-flex h-5 shrink-0 items-center rounded-sm border px-1.5 font-mono text-[10px] tracking-[0.01em] transition ${
               showThinkingTraces
                 ? "border-primary/45 bg-primary/14 text-foreground"
                 : "border-border/70 bg-surface-2/40 text-muted-foreground hover:text-foreground"
@@ -1127,6 +1145,8 @@ export const AgentChatPanel = ({
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameDraft, setRenameDraft] = useState(agent.name);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [transcriptModalOpen, setTranscriptModalOpen] = useState(false);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const renameEditorRef = useRef<HTMLDivElement | null>(null);
@@ -1137,6 +1157,7 @@ export const AgentChatPanel = ({
     sessionKey: agent.sessionKey,
   });
   const pendingResizeFrameRef = useRef<number | null>(null);
+  const voiceProviderPrimedByAgentRef = useRef<Record<string, boolean>>({});
 
   const resizeDraft = useCallback(() => {
     const el = draftRef.current;
@@ -1176,6 +1197,11 @@ export const AgentChatPanel = ({
     setRenameError(null);
     setRenameDraft(agent.name);
   }, [agent.agentId, agent.name]);
+
+  useEffect(() => {
+    setVoiceEnabled(false);
+    setTranscriptModalOpen(false);
+  }, [agent.agentId, agent.sessionKey]);
 
   useEffect(() => {
     if (!renameEditing) return;
@@ -1295,6 +1321,28 @@ export const AgentChatPanel = ({
     handleSend(draftValue);
   }, [draftValue, handleSend]);
 
+  const handleVoiceToggle = useCallback(
+    (enabled: boolean) => {
+      if (!canSend) return;
+      setVoiceEnabled(enabled);
+      scrollToBottomNextOutputRef.current = true;
+      if (enabled) {
+        if (!voiceProviderPrimedByAgentRef.current[agent.agentId]) {
+          voiceProviderPrimedByAgentRef.current[agent.agentId] = true;
+          onSend("/tts provider edge");
+        }
+        onSend("/tts always");
+        return;
+      }
+      onSend("/tts off");
+    },
+    [agent.agentId, canSend, onSend]
+  );
+
+  const handleTranscriptModalClose = useCallback(() => {
+    setTranscriptModalOpen(false);
+  }, []);
+
   const beginRename = useCallback(() => {
     if (!onRename) return;
     setRenameEditing(true);
@@ -1380,9 +1428,9 @@ export const AgentChatPanel = ({
   const newSessionDisabled = newSessionBusy || !canSend || !onNewSession;
 
   return (
-    <div data-agent-panel className="group fade-up relative flex h-full w-full flex-col">
+    <div data-agent-panel className="group fade-up relative flex h-full w-full min-w-0 flex-col overflow-hidden">
       <div className="px-3 pt-2 sm:px-4 sm:pt-3">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             <div className="group/avatar relative">
               <AgentAvatar
@@ -1409,7 +1457,7 @@ export const AgentChatPanel = ({
 
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-2">
-                <div className="min-w-0 w-[clamp(11rem,34vw,16rem)]">
+                <div className="min-w-0 w-[clamp(8.5rem,42vw,16rem)] sm:w-[clamp(11rem,34vw,16rem)]">
                   {renameEditing ? (
                     <div ref={renameEditorRef} className="flex h-8 items-center gap-1.5">
                       <input
@@ -1474,7 +1522,16 @@ export const AgentChatPanel = ({
             </div>
           </div>
 
-          <div className="mt-0.5 flex items-center gap-2">
+          <div className="mt-0.5 flex w-full items-center justify-end gap-2 sm:w-auto">
+            <button
+              className="nodrag ui-btn-icon !inline-flex md:!hidden"
+              type="button"
+              aria-label="Expand transcript"
+              title="Expand transcript"
+              onClick={() => setTranscriptModalOpen(true)}
+            >
+              <Maximize2 className="h-4 w-4" />
+            </button>
             <button
               className="nodrag ui-btn-primary px-2.5 py-1.5 font-mono text-[11px] font-medium tracking-[0.02em] disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
               type="button"
@@ -1502,32 +1559,34 @@ export const AgentChatPanel = ({
         </div>
       </div>
 
-      <div className="mt-3 flex min-h-0 flex-1 flex-col px-3 pb-3 sm:px-4 sm:pb-4">
-        <AgentChatTranscript
-          agentId={agent.agentId}
-          name={agent.name}
-          avatarSeed={avatarSeed}
-          avatarUrl={agent.avatarUrl ?? null}
-          status={agent.status}
-          historyMaybeTruncated={agent.historyMaybeTruncated}
-          historyFetchedCount={agent.historyFetchedCount}
-          historyFetchLimit={agent.historyFetchLimit}
-          onLoadMoreHistory={onLoadMoreHistory}
-          chatItems={chatItems}
-          liveThinkingText={liveThinkingText}
-          liveAssistantText={liveAssistantText}
-          showTypingIndicator={showTypingIndicator}
-          outputLineCount={agent.outputLines.length}
-          liveAssistantCharCount={liveAssistantText.length}
-          liveThinkingCharCount={liveThinkingText.length}
-          runStartedAt={agent.runStartedAt}
-          scrollToBottomNextOutputRef={scrollToBottomNextOutputRef}
-          pendingExecApprovals={pendingExecApprovals}
-          onResolveExecApproval={onResolveExecApproval}
-          emptyStateTitle={emptyStateTitle}
-        />
+      <div className="mt-3 flex min-h-0 flex-1 flex-col px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4 sm:pb-4">
+        <div className="relative h-0 min-h-0 flex-1 overflow-hidden">
+          <AgentChatTranscript
+            agentId={agent.agentId}
+            name={agent.name}
+            avatarSeed={avatarSeed}
+            avatarUrl={agent.avatarUrl ?? null}
+            status={agent.status}
+            historyMaybeTruncated={agent.historyMaybeTruncated}
+            historyFetchedCount={agent.historyFetchedCount}
+            historyFetchLimit={agent.historyFetchLimit}
+            onLoadMoreHistory={onLoadMoreHistory}
+            chatItems={chatItems}
+            liveThinkingText={liveThinkingText}
+            liveAssistantText={liveAssistantText}
+            showTypingIndicator={showTypingIndicator}
+            outputLineCount={agent.outputLines.length}
+            liveAssistantCharCount={liveAssistantText.length}
+            liveThinkingCharCount={liveThinkingText.length}
+            runStartedAt={agent.runStartedAt}
+            scrollToBottomNextOutputRef={scrollToBottomNextOutputRef}
+            pendingExecApprovals={pendingExecApprovals}
+            onResolveExecApproval={onResolveExecApproval}
+            emptyStateTitle={emptyStateTitle}
+          />
+        </div>
 
-        <div className="mt-3">
+        <div className="relative z-20 mt-3">
           <AgentChatComposer
             value={draftValue}
             inputRef={handleDraftRef}
@@ -1555,9 +1614,50 @@ export const AgentChatPanel = ({
             showThinkingTraces={agent.showThinkingTraces}
             onToolCallingToggle={onToolCallingToggle}
             onThinkingTracesToggle={onThinkingTracesToggle}
+            voiceEnabled={voiceEnabled}
+            onVoiceToggle={handleVoiceToggle}
           />
         </div>
       </div>
+
+      {transcriptModalOpen ? (
+        <div className="fixed inset-0 z-[130] flex min-h-0 flex-col bg-background xl:hidden">
+          <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
+            <div className="truncate text-sm font-medium text-foreground">{agent.name} · Transcript</div>
+            <button
+              type="button"
+              className="ui-btn-secondary px-3 py-1.5 text-xs"
+              onClick={handleTranscriptModalClose}
+            >
+              Close
+            </button>
+          </div>
+          <div className="h-0 min-h-0 flex-1 overflow-hidden px-2 pb-2">
+            <AgentChatTranscript
+              agentId={agent.agentId}
+              name={agent.name}
+              avatarSeed={avatarSeed}
+              avatarUrl={agent.avatarUrl ?? null}
+              status={agent.status}
+              historyMaybeTruncated={false}
+              historyFetchedCount={agent.historyFetchedCount}
+              historyFetchLimit={agent.historyFetchLimit}
+              onLoadMoreHistory={() => {}}
+              chatItems={chatItems}
+              liveThinkingText={liveThinkingText}
+              liveAssistantText={liveAssistantText}
+              showTypingIndicator={showTypingIndicator}
+              outputLineCount={agent.outputLines.length}
+              liveAssistantCharCount={liveAssistantText.length}
+              liveThinkingCharCount={liveThinkingText.length}
+              runStartedAt={agent.runStartedAt}
+              scrollToBottomNextOutputRef={scrollToBottomNextOutputRef}
+              pendingExecApprovals={[]}
+              emptyStateTitle={emptyStateTitle}
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

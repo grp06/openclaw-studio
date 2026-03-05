@@ -178,6 +178,36 @@ describe("AgentChatPanel controls", () => {
     expect(onNewSession).toHaveBeenCalledTimes(1);
   });
 
+  it("opens read-only transcript modal from expand icon", async () => {
+    render(
+      createElement(AgentChatPanel, {
+        agent: {
+          ...createAgent(),
+          outputLines: ["> show transcript", "Hello from assistant"],
+        },
+        isSelected: true,
+        canSend: true,
+        models,
+        stopBusy: false,
+        onLoadMoreHistory: vi.fn(),
+        onOpenSettings: vi.fn(),
+        onModelChange: vi.fn(),
+        onThinkingChange: vi.fn(),
+        onDraftChange: vi.fn(),
+        onSend: vi.fn(),
+        onStopRun: vi.fn(),
+        onAvatarShuffle: vi.fn(),
+      })
+    );
+
+    fireEvent.click(screen.getByLabelText("Expand transcript"));
+    expect(screen.getByText(/Agent One · Transcript/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Close/i }));
+    await waitFor(() => {
+      expect(screen.queryByText(/Agent One · Transcript/i)).not.toBeInTheDocument();
+    });
+  });
+
   it("does_not_render_inline_status_badge_markers", () => {
     const { rerender, container } = render(
       createElement(AgentChatPanel, {
@@ -302,6 +332,35 @@ describe("AgentChatPanel controls", () => {
 
     fireEvent.click(screen.getByTestId("agent-settings-toggle"));
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("primes_and_toggles_voice_mode_with_expected_commands", () => {
+    const onSend = vi.fn();
+
+    render(
+      createElement(AgentChatPanel, {
+        agent: createAgent(),
+        isSelected: true,
+        canSend: true,
+        models,
+        stopBusy: false,
+        onLoadMoreHistory: vi.fn(),
+        onOpenSettings: vi.fn(),
+        onModelChange: vi.fn(),
+        onThinkingChange: vi.fn(),
+        onDraftChange: vi.fn(),
+        onSend,
+        onStopRun: vi.fn(),
+        onAvatarShuffle: vi.fn(),
+      })
+    );
+
+    fireEvent.click(screen.getByRole("switch", { name: /turn voice on/i }));
+    expect(onSend).toHaveBeenNthCalledWith(1, "/tts provider edge");
+    expect(onSend).toHaveBeenNthCalledWith(2, "/tts always");
+
+    fireEvent.click(screen.getByRole("switch", { name: /turn voice off/i }));
+    expect(onSend).toHaveBeenNthCalledWith(3, "/tts off");
   });
 
   it("shows_stop_button_while_running_and_invokes_stop_handler", () => {

@@ -150,7 +150,10 @@ export function planFocusedPreferenceRestore(params: {
     };
   }
 
-  const restoredFilter = preference.filter === "running" ? "all" : preference.filter;
+  const restoredFilter =
+    preference.filter === "running" || preference.filter === "approvals"
+      ? "all"
+      : preference.filter;
   return {
     preferredSelectedAgentId: preference.selectedAgentId,
     focusFilter: restoredFilter,
