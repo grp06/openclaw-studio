@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/.tmp-vitest/
 
 # next.js
 /.next/
@@ -23,6 +24,7 @@
 # misc
 .DS_Store
 *.pem
+/.worktrees/
 
 # debug
 npm-debug.log*

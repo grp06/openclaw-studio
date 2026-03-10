@@ -180,7 +180,7 @@ describe("studioBootstrapWorkflow", () => {
       })
     ).toEqual({
       preferredSelectedAgentId: "agent-3",
-      focusFilter: "approvals",
+      focusFilter: "all",
     });
 
     expect(

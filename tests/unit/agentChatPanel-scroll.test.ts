@@ -50,7 +50,8 @@ describe("AgentChatPanel scrolling", () => {
   });
 
   it("shows jump-to-latest when unpinned and new output arrives, and jumps on click", async () => {
-    (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = vi.fn();
+    const scrollIntoView = vi.fn();
+    (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scrollIntoView;
 
     const agent = createAgent();
     const { rerender } = render(
@@ -102,10 +103,8 @@ describe("AgentChatPanel scrolling", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
 
-    expect(
-      (Element.prototype as unknown as { scrollIntoView: ReturnType<typeof vi.fn> })
-        .scrollIntoView
-    ).toHaveBeenCalled();
+    expect(scrollEl.scrollTop).toBe(1000);
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
   it("scrolls to the bottom when a different agent is opened", async () => {
@@ -137,12 +136,6 @@ describe("AgentChatPanel scrolling", () => {
     Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
     Object.defineProperty(scrollEl, "scrollTop", { value: 0, writable: true, configurable: true });
 
-    await waitFor(() => {
-      expect(scrollIntoView).toHaveBeenCalled();
-    });
-
-    scrollIntoView.mockClear();
-
     rerender(
       createElement(AgentChatPanel, {
         agent: createAgent({
@@ -167,8 +160,9 @@ describe("AgentChatPanel scrolling", () => {
     );
 
     await waitFor(() => {
-      expect(scrollIntoView).toHaveBeenCalled();
+      expect(scrollEl.scrollTop).toBe(1000);
     });
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
   it("shows history truncation banner only when scrolled to top", () => {
@@ -208,5 +202,69 @@ describe("AgentChatPanel scrolling", () => {
     scrollEl.scrollTop = 0;
     fireEvent.scroll(scrollEl);
     expect(screen.getByText(/Showing latest 200 turns/i)).toBeInTheDocument();
+  });
+
+  it("keeps the transcript pinned to the chat container when sending", async () => {
+    const scrollIntoView = vi.fn();
+    (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scrollIntoView;
+    const onSend = vi.fn();
+    const agent = createAgent({
+      draft: "Investigate the scroll jump",
+      outputLines: ["> earlier question", "earlier answer"],
+    });
+    const { rerender } = render(
+      createElement(AgentChatPanel, {
+        agent,
+        isSelected: true,
+        canSend: true,
+        models,
+        stopBusy: false,
+        onLoadMoreHistory: vi.fn(),
+        onOpenSettings: vi.fn(),
+        onModelChange: vi.fn(),
+        onThinkingChange: vi.fn(),
+        onDraftChange: vi.fn(),
+        onSend,
+        onStopRun: vi.fn(),
+        onAvatarShuffle: vi.fn(),
+      })
+    );
+
+    const scrollEl = screen.getByTestId("agent-chat-scroll");
+    Object.defineProperty(scrollEl, "clientHeight", { value: 100, configurable: true });
+    Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, writable: true, configurable: true });
+    Object.defineProperty(scrollEl, "scrollTop", { value: 900, writable: true, configurable: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onSend).toHaveBeenCalledWith("Investigate the scroll jump");
+
+    Object.defineProperty(scrollEl, "scrollHeight", { value: 1040, writable: true, configurable: true });
+
+    rerender(
+      createElement(AgentChatPanel, {
+        agent: {
+          ...agent,
+          draft: "",
+          outputLines: ["> earlier question", "earlier answer", "> Investigate the scroll jump"],
+        },
+        isSelected: true,
+        canSend: true,
+        models,
+        stopBusy: false,
+        onLoadMoreHistory: vi.fn(),
+        onOpenSettings: vi.fn(),
+        onModelChange: vi.fn(),
+        onThinkingChange: vi.fn(),
+        onDraftChange: vi.fn(),
+        onSend,
+        onStopRun: vi.fn(),
+        onAvatarShuffle: vi.fn(),
+      })
+    );
+
+    await waitFor(() => {
+      expect(scrollEl.scrollTop).toBe(1040);
+    });
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 });

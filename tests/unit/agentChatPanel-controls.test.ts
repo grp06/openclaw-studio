@@ -178,6 +178,36 @@ describe("AgentChatPanel controls", () => {
     expect(onNewSession).toHaveBeenCalledTimes(1);
   });
 
+  it("opens read-only transcript modal from expand icon", async () => {
+    render(
+      createElement(AgentChatPanel, {
+        agent: {
+          ...createAgent(),
+          outputLines: ["> show transcript", "Hello from assistant"],
+        },
+        isSelected: true,
+        canSend: true,
+        models,
+        stopBusy: false,
+        onLoadMoreHistory: vi.fn(),
+        onOpenSettings: vi.fn(),
+        onModelChange: vi.fn(),
+        onThinkingChange: vi.fn(),
+        onDraftChange: vi.fn(),
+        onSend: vi.fn(),
+        onStopRun: vi.fn(),
+        onAvatarShuffle: vi.fn(),
+      })
+    );
+
+    fireEvent.click(screen.getByLabelText("Expand transcript"));
+    expect(screen.getByText(/Agent One · Transcript/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Close/i }));
+    await waitFor(() => {
+      expect(screen.queryByText(/Agent One · Transcript/i)).not.toBeInTheDocument();
+    });
+  });
+
   it("does_not_render_inline_status_badge_markers", () => {
     const { rerender, container } = render(
       createElement(AgentChatPanel, {
