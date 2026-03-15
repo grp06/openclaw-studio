@@ -89,13 +89,12 @@ const loadFleetSeeds = async (): Promise<AgentSeed[]> => {
     body: JSON.stringify({}),
   });
 
-  if (response.error) {
-    throw new Error(response.error);
-  }
-
+  /* The fleet API can return usable result.seeds together with an error
+     in degraded mode (see buildDegradedFleetResponse in route.ts).
+     Only throw when seeds are truly missing. */
   const seeds = response.result?.seeds;
-  if (!Array.isArray(seeds)) {
-    throw new Error("No agents returned from fleet.");
+  if (!Array.isArray(seeds) || seeds.length === 0) {
+    throw new Error(response.error ?? "No agents returned from fleet.");
   }
 
   return seeds;
@@ -286,10 +285,32 @@ export default function ComparePage() {
 
   const saveFile = useCallback(async (agentId: string, fileName: AgentFileName, content: string) => {
     const k = `${agentId}:${fileName}`;
+    /* Snapshot the content we are about to persist so we can detect
+       whether the user made additional edits while the request was
+       in-flight. Only clear the dirty flag when the current content
+       still matches the saved snapshot. */
+    const savedContent = content;
     setSavingKeys((prev) => new Set(prev).add(k));
     try {
-      await writeDomainAgentFile({ agentId, name: fileName, content });
-      setDirtyKeys((prev) => { const next = new Set(prev); next.delete(k); return next; });
+      await writeDomainAgentFile({ agentId, name: fileName, content: savedContent });
+      setDirtyKeys((prev) => {
+        /* Re-read current content from entries state to check for edits during save */
+        const next = new Set(prev);
+        /* We rely on the caller passing the content at save-time.
+           If the textarea content has changed since then, updateFileContent
+           will have re-added the dirty key, so we only clear if still present
+           AND the current entries content matches what we saved. */
+        next.delete(k);
+        return next;
+      });
+      /* Re-check: if the content was modified during save, mark dirty again */
+      setEntries((prev) => {
+        const entry = prev.find((e) => e.agent.agentId === agentId);
+        if (entry && entry.files[fileName].content !== savedContent) {
+          setDirtyKeys((dk) => new Set(dk).add(k));
+        }
+        return prev;
+      });
     } catch (err) {
       console.error("Save failed:", err);
     } finally {
