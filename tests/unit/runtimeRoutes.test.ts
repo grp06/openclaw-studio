@@ -2,6 +2,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ControlPlaneGatewayConnectError } from "@/lib/controlplane/openclaw-adapter";
+
 type RuntimeMock = {
   ensureStarted: () => Promise<void>;
   snapshot: () => { status: string; reason: string | null; asOf: string | null; outboxHead: number };
@@ -139,6 +141,57 @@ describe("runtime routes", () => {
     expect(body.freshness.stale).toBe(true);
     expect(body.freshness.source).toBe("projection");
     expect(body.freshness.reason).toBe("gateway_unavailable");
+  });
+
+  it("summary route includes structured start failure metadata when startup fails with connect metadata", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/controlplane/runtime", () => ({
+      isStudioDomainApiModeEnabled: () => true,
+      getControlPlaneRuntime: () => ({
+        ensureStarted: async () => {
+          throw new ControlPlaneGatewayConnectError({
+            code: "INVALID_REQUEST",
+            message:
+              "Control-plane connect rejected: INVALID_REQUEST control ui requires device identity (use HTTPS or localhost secure context)",
+            profileId: "legacy-control-ui",
+            details: { code: "CONTROL_UI_DEVICE_IDENTITY_REQUIRED" },
+            rejectedByGateway: true,
+          });
+        },
+        snapshot: () => ({
+          status: "error",
+          reason: "gateway_closed",
+          asOf: "2026-02-28T02:40:00.000Z",
+          outboxHead: 9,
+        }),
+        eventsAfter: () => [],
+        eventsBefore: () => [],
+        eventsBeforeForAgent: () => [],
+        backfillAgentHistoryIndex: () => ({ scannedRows: 0, updatedRows: 0, exhausted: true }),
+        subscribe: () => () => {},
+      }),
+    }));
+
+    const mod = await import("@/app/api/runtime/summary/route");
+    const response = await mod.GET();
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      error?: string;
+      startFailure?: {
+        code?: string;
+        message?: string;
+        profileId?: string;
+        details?: unknown;
+      };
+    };
+    expect(body.error).toContain("control ui requires device identity");
+    expect(body.startFailure).toEqual({
+      code: "INVALID_REQUEST",
+      message:
+        "Control-plane connect rejected: INVALID_REQUEST control ui requires device identity (use HTTPS or localhost secure context)",
+      profileId: "legacy-control-ui",
+      details: { code: "CONTROL_UI_DEVICE_IDENTITY_REQUIRED" },
+    });
   });
 
   it("summary route returns 503 when runtime initialization fails", async () => {

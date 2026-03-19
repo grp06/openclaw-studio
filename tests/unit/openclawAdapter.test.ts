@@ -112,8 +112,11 @@ describe("OpenClawGatewayAdapter", () => {
     let observedConnectClientMode: string | null = null;
     let observedConnectClientPlatform: string | null = null;
     let observedConnectCaps: string[] | null = null;
+    let observedOriginHeader: string | undefined;
 
-    upstream.on("connection", (ws) => {
+    upstream.on("connection", (ws, request) => {
+      observedOriginHeader =
+        typeof request.headers.origin === "string" ? request.headers.origin : undefined;
       ws.send(JSON.stringify({ type: "event", event: "connect.challenge", payload: {} }));
       ws.on("message", (raw) => {
         const parsed = JSON.parse(String(raw ?? "")) as {
@@ -159,6 +162,7 @@ describe("OpenClawGatewayAdapter", () => {
     expect(observedConnectClientMode).toBe("backend");
     expect(observedConnectClientPlatform).toBe("node");
     expect(observedConnectCaps).toEqual(expect.arrayContaining(["tool-events"]));
+    expect(observedOriginHeader).toBeUndefined();
 
     await adapter.stop();
   });
@@ -370,10 +374,14 @@ describe("OpenClawGatewayAdapter", () => {
     let connectionCount = 0;
     const connectedClientIds: string[] = [];
     const connectedClientModes: string[] = [];
+    const observedOriginHeaders: Array<string | undefined> = [];
 
-    upstream.on("connection", (ws) => {
+    upstream.on("connection", (ws, request) => {
       connectionCount += 1;
       const activeConnection = connectionCount;
+      observedOriginHeaders.push(
+        typeof request.headers.origin === "string" ? request.headers.origin : undefined
+      );
       ws.send(JSON.stringify({ type: "event", event: "connect.challenge", payload: {} }));
       ws.on("message", (raw) => {
         const parsed = JSON.parse(String(raw ?? "")) as {
@@ -433,6 +441,90 @@ describe("OpenClawGatewayAdapter", () => {
     expect(connectedClientModes[0]).toBe("backend");
     expect(connectedClientIds[1]).toBe("openclaw-control-ui");
     expect(connectedClientModes[1]).toBe("webchat");
+    expect(observedOriginHeaders[0]).toBeUndefined();
+    expect(observedOriginHeaders[1]).toBe(`http://localhost:${address.port}`);
+
+    await adapter.stop();
+  });
+
+  it("resets the connect profile to backend-local after an explicit stop", async () => {
+    upstream = new WebSocketServer({ port: 0 });
+    const address = upstream.address();
+    if (!address || typeof address === "string") {
+      throw new Error("expected upstream server to provide a numeric port");
+    }
+    const upstreamUrl = `ws://127.0.0.1:${address.port}`;
+    let connectionCount = 0;
+    const connectedClientIds: string[] = [];
+    const observedOriginHeaders: Array<string | undefined> = [];
+
+    upstream.on("connection", (ws, request) => {
+      connectionCount += 1;
+      const activeConnection = connectionCount;
+      observedOriginHeaders.push(
+        typeof request.headers.origin === "string" ? request.headers.origin : undefined
+      );
+      ws.send(JSON.stringify({ type: "event", event: "connect.challenge", payload: {} }));
+      ws.on("message", (raw) => {
+        const parsed = JSON.parse(String(raw ?? "")) as {
+          id?: string;
+          method?: string;
+          params?: {
+            client?: { id?: string };
+          };
+        };
+        if (parsed.method === "connect" && parsed.id) {
+          connectedClientIds.push(parsed.params?.client?.id ?? "unknown");
+          ws.send(
+            JSON.stringify({
+              type: "res",
+              id: parsed.id,
+              ok: true,
+              payload: { type: "hello-ok", protocol: 3 },
+            })
+          );
+          return;
+        }
+        if (parsed.method !== "status" || !parsed.id) {
+          return;
+        }
+        if (activeConnection === 1) {
+          ws.send(
+            JSON.stringify({
+              type: "res",
+              id: parsed.id,
+              ok: false,
+              error: { code: "INVALID_REQUEST", message: "missing scope: operator.read" },
+            })
+          );
+          return;
+        }
+        ws.send(
+          JSON.stringify({
+            type: "res",
+            id: parsed.id,
+            ok: true,
+            payload: { ok: true, activeConnection },
+          })
+        );
+      });
+    });
+
+    const adapter = new OpenClawGatewayAdapter({
+      loadSettings: () => ({ url: upstreamUrl, token: "tkn" }),
+    });
+
+    await adapter.start();
+    await expect(adapter.request("status", {})).resolves.toEqual({ ok: true, activeConnection: 2 });
+    expect(connectedClientIds).toEqual(["gateway-client", "openclaw-control-ui"]);
+    expect(observedOriginHeaders).toEqual([undefined, `http://localhost:${address.port}`]);
+
+    await adapter.stop();
+    await adapter.start();
+    await waitForCondition(() => connectedClientIds.length >= 3);
+
+    expect(connectedClientIds[2]).toBe("gateway-client");
+    expect(observedOriginHeaders[2]).toBeUndefined();
 
     await adapter.stop();
   });

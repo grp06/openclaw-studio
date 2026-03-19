@@ -2,6 +2,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ControlPlaneGatewayConnectError } from "@/lib/controlplane/openclaw-adapter";
+
 describe("runtime route bootstrap", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -83,7 +85,42 @@ describe("runtime route bootstrap", () => {
       throw new Error("expected start-failed result");
     }
     expect(result.message).toBe("start failed");
+    expect(result.startFailure).toBeNull();
     expect(result.runtime).toBe(runtime);
+  });
+
+  it("returns structured start failure when startup fails with connect metadata", async () => {
+    const runtime = {
+      ensureStarted: async () => {
+        throw new ControlPlaneGatewayConnectError({
+          code: "INVALID_REQUEST",
+          message:
+            "Control-plane connect rejected: INVALID_REQUEST control ui requires device identity (use HTTPS or localhost secure context)",
+          profileId: "legacy-control-ui",
+          details: { code: "CONTROL_UI_DEVICE_IDENTITY_REQUIRED" },
+          rejectedByGateway: true,
+        });
+      },
+    };
+    vi.doMock("@/lib/controlplane/runtime", () => ({
+      isStudioDomainApiModeEnabled: () => true,
+      getControlPlaneRuntime: () => runtime,
+    }));
+
+    const { bootstrapDomainRuntime } = await import("@/lib/controlplane/runtime-route-bootstrap");
+    const result = await bootstrapDomainRuntime();
+    expect(result.kind).toBe("start-failed");
+    if (result.kind !== "start-failed") {
+      throw new Error("expected start-failed result");
+    }
+    expect(result.message).toContain("control ui requires device identity");
+    expect(result.startFailure).toEqual({
+      code: "INVALID_REQUEST",
+      message:
+        "Control-plane connect rejected: INVALID_REQUEST control ui requires device identity (use HTTPS or localhost secure context)",
+      profileId: "legacy-control-ui",
+      details: { code: "CONTROL_UI_DEVICE_IDENTITY_REQUIRED" },
+    });
   });
 
   it("returns ready when runtime startup succeeds", async () => {

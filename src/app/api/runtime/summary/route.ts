@@ -22,11 +22,13 @@ export async function GET() {
   }
   const controlPlane = bootstrap.runtime;
   const startError = bootstrap.kind === "start-failed" ? bootstrap.message : null;
+  const startFailure = bootstrap.kind === "start-failed" ? bootstrap.startFailure : null;
 
   const snapshot = controlPlane.snapshot();
   return NextResponse.json({
     enabled: true,
     ...(startError ? { error: startError } : {}),
+    ...(startFailure ? { startFailure } : {}),
     summary: snapshot,
     freshness: deriveRuntimeFreshness(snapshot, null),
   });

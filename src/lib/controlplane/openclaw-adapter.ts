@@ -9,6 +9,13 @@ import type {
   GatewayEventFrame,
   GatewayResponseFrame,
 } from "@/lib/controlplane/contracts";
+import {
+  buildGatewayConnectProfile,
+  type GatewayConnectProfile,
+  type GatewayConnectProfileId,
+  type GatewaySocketOptions,
+  shouldFallbackToLegacyControlUi,
+} from "@/lib/controlplane/gateway-connect-profile";
 import { loadStudioSettings } from "@/lib/studio/settings-store";
 
 const CONNECT_TIMEOUT_MS = 8_000;
@@ -16,12 +23,6 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const INITIAL_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 15_000;
 const CONNECT_PROTOCOL = 3;
-const CONNECT_CLIENT_ID_BACKEND = "gateway-client";
-const CONNECT_CLIENT_MODE_BACKEND = "backend";
-const CONNECT_CLIENT_PLATFORM_BACKEND = "node";
-const CONNECT_CLIENT_ID_LEGACY = "openclaw-control-ui";
-const CONNECT_CLIENT_MODE_LEGACY = "webchat";
-const CONNECT_CLIENT_PLATFORM_LEGACY = "web";
 const CONNECT_CAPABILITIES = ["tool-events"];
 
 const DEFAULT_METHOD_ALLOWLIST = new Set<string>([
@@ -70,6 +71,70 @@ export class ControlPlaneGatewayError extends Error {
   }
 }
 
+export type SerializedControlPlaneGatewayConnectFailure = {
+  code: string;
+  message: string;
+  profileId: GatewayConnectProfileId;
+  details?: unknown;
+};
+
+export class ControlPlaneGatewayConnectError extends Error {
+  readonly code: string;
+  readonly profileId: GatewayConnectProfileId;
+  readonly details?: unknown;
+  readonly rejectedByGateway: boolean;
+
+  constructor(params: {
+    code: string;
+    message: string;
+    profileId: GatewayConnectProfileId;
+    details?: unknown;
+    rejectedByGateway: boolean;
+  }) {
+    super(params.message);
+    this.name = "ControlPlaneGatewayConnectError";
+    this.code = params.code;
+    this.profileId = params.profileId;
+    this.details = params.details;
+    this.rejectedByGateway = params.rejectedByGateway;
+  }
+}
+
+const isSerializedGatewayConnectFailure = (
+  error: unknown
+): error is SerializedControlPlaneGatewayConnectFailure => {
+  if (!isObject(error)) {
+    return false;
+  }
+  if (typeof error.code !== "string" || typeof error.message !== "string") {
+    return false;
+  }
+  const profileId = error.profileId;
+  return profileId === "backend-local" || profileId === "legacy-control-ui";
+};
+
+export const serializeControlPlaneGatewayConnectFailure = (
+  error: unknown
+): SerializedControlPlaneGatewayConnectFailure | null => {
+  if (error instanceof ControlPlaneGatewayConnectError) {
+    return {
+      code: error.code,
+      message: error.message,
+      profileId: error.profileId,
+      ...(error.details === undefined ? {} : { details: error.details }),
+    };
+  }
+  if (!isSerializedGatewayConnectFailure(error)) {
+    return null;
+  }
+  return {
+    code: error.code,
+    message: error.message,
+    profileId: error.profileId,
+    ...(error.details === undefined ? {} : { details: error.details }),
+  };
+};
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object");
 
@@ -78,17 +143,6 @@ const resolveRequestTimeoutMs = (timeoutMs?: number): number => {
     return Math.max(1, Math.floor(timeoutMs));
   }
   return DEFAULT_REQUEST_TIMEOUT_MS;
-};
-
-const resolveOriginForUpstream = (upstreamUrl: string): string => {
-  const url = new URL(upstreamUrl);
-  const proto = url.protocol === "wss:" ? "https:" : "http:";
-  const hostname =
-    url.hostname === "127.0.0.1" || url.hostname === "::1" || url.hostname === "0.0.0.0"
-      ? "localhost"
-      : url.hostname;
-  const host = url.port ? `${hostname}:${url.port}` : hostname;
-  return `${proto}//${host}`;
 };
 
 const resolveConnectFailureMessage = (error: unknown, upstreamUrl: string): string => {
@@ -106,6 +160,9 @@ const resolveConnectFailureMessage = (error: unknown, upstreamUrl: string): stri
 };
 
 const isConnectRejectionError = (error: unknown): boolean => {
+  if (error instanceof ControlPlaneGatewayConnectError) {
+    return error.rejectedByGateway;
+  }
   if (!(error instanceof Error)) return false;
   return error.message.startsWith("Control-plane connect rejected:");
 };
@@ -126,7 +183,7 @@ const loadGatewaySettings = (): ControlPlaneGatewaySettings => {
 
 export type OpenClawAdapterOptions = {
   loadSettings?: () => ControlPlaneGatewaySettings;
-  createWebSocket?: (url: string, opts: { origin: string }) => WebSocket;
+  createWebSocket?: (url: string, opts: GatewaySocketOptions) => WebSocket;
   methodAllowlist?: Set<string>;
   onDomainEvent?: (event: ControlPlaneDomainEvent) => void;
 };
@@ -145,11 +202,12 @@ export class OpenClawGatewayAdapter {
   private connectionEpoch: string | null = null;
   private pending = new Map<string, PendingRequest>();
   private loadSettings: () => ControlPlaneGatewaySettings;
-  private createWebSocket: (url: string, opts: { origin: string }) => WebSocket;
+  private createWebSocket: (url: string, opts: GatewaySocketOptions) => WebSocket;
   private methodAllowlist: Set<string>;
   private onDomainEvent?: (event: ControlPlaneDomainEvent) => void;
-  private useLegacyControlUiProfile = false;
+  private connectProfileId: GatewayConnectProfileId = "backend-local";
   private legacyProfileSwitchPromise: Promise<void> | null = null;
+  private preserveConnectProfileOnStop = false;
 
   constructor(options?: OpenClawAdapterOptions) {
     this.loadSettings = options?.loadSettings ?? loadGatewaySettings;
@@ -199,6 +257,9 @@ export class OpenClawGatewayAdapter {
     } else {
       ws?.terminate();
     }
+    if (!this.preserveConnectProfileOnStop) {
+      this.connectProfileId = "backend-local";
+    }
     this.updateStatus("stopped", null);
   }
 
@@ -244,7 +305,7 @@ export class OpenClawGatewayAdapter {
       });
       return response as T;
     } catch (error) {
-      if (this.isOperatorScopeMissingError(error)) {
+      if (shouldFallbackToLegacyControlUi(error)) {
         await this.switchToLegacyControlUiProfile();
         return this.request<T>(method, params, options);
       }
@@ -258,8 +319,15 @@ export class OpenClawGatewayAdapter {
 
   private async connect(): Promise<void> {
     const settings = this.loadSettings();
+    const profile = buildGatewayConnectProfile({
+      profileId: this.connectProfileId,
+      upstreamUrl: settings.url,
+      token: settings.token,
+      protocol: CONNECT_PROTOCOL,
+      capabilities: CONNECT_CAPABILITIES,
+    });
     this.connectionEpoch = randomUUID();
-    const ws = this.createWebSocket(settings.url, { origin: resolveOriginForUpstream(settings.url) });
+    const ws = this.createWebSocket(settings.url, profile.socketOptions);
     this.ws = ws;
     this.connectRequestId = null;
     this.updateStatus(this.reconnectAttempt > 0 ? "reconnecting" : "connecting", null);
@@ -280,7 +348,14 @@ export class OpenClawGatewayAdapter {
       this.connectTimer = setTimeout(() => {
         settle(() => {
           ws.close(1011, "connect timeout");
-          reject(new Error("Control-plane connect timed out waiting for connect response."));
+          reject(
+            new ControlPlaneGatewayConnectError({
+              code: "CONNECT_TIMEOUT",
+              message: "Control-plane connect timed out waiting for connect response.",
+              profileId: profile.id,
+              rejectedByGateway: false,
+            })
+          );
         });
       }, CONNECT_TIMEOUT_MS);
 
@@ -289,7 +364,7 @@ export class OpenClawGatewayAdapter {
         if (!parsed) return;
         if (parsed.type === "event") {
           if (parsed.event === "connect.challenge") {
-            this.sendConnectRequest(settings.token);
+            this.sendConnectRequest(profile);
             return;
           }
           this.emitEvent({
@@ -315,7 +390,15 @@ export class OpenClawGatewayAdapter {
           settle(() => {
             allowReconnectAfterClose = false;
             ws.close(1011, "connect failed");
-            reject(new Error(`Control-plane connect rejected: ${code} ${message}`));
+            reject(
+              new ControlPlaneGatewayConnectError({
+                code,
+                message: `Control-plane connect rejected: ${code} ${message}`,
+                profileId: profile.id,
+                details: parsed.error?.details,
+                rejectedByGateway: true,
+              })
+            );
           });
         }
       });
@@ -323,7 +406,16 @@ export class OpenClawGatewayAdapter {
       ws.on("close", () => {
         if (this.stopping) return;
         if (!settled) {
-          settle(() => reject(new Error("Control-plane gateway connection closed during connect.")));
+          settle(() =>
+            reject(
+              new ControlPlaneGatewayConnectError({
+                code: "CONNECT_CLOSED",
+                message: "Control-plane gateway connection closed during connect.",
+                profileId: profile.id,
+                rejectedByGateway: false,
+              })
+            )
+          );
           return;
         }
         this.rejectPending("Control-plane gateway connection closed.");
@@ -338,7 +430,16 @@ export class OpenClawGatewayAdapter {
       ws.on("error", (error) => {
         if (this.stopping) return;
         if (!settled) {
-          settle(() => reject(new Error(resolveConnectFailureMessage(error, settings.url))));
+          settle(() =>
+            reject(
+              new ControlPlaneGatewayConnectError({
+                code: "CONNECT_FAILED",
+                message: resolveConnectFailureMessage(error, settings.url),
+                profileId: profile.id,
+                rejectedByGateway: false,
+              })
+            )
+          );
         }
       });
     }).catch((err) => {
@@ -365,10 +466,9 @@ export class OpenClawGatewayAdapter {
     }, delay);
   }
 
-  private sendConnectRequest(token: string): void {
+  private sendConnectRequest(profile: GatewayConnectProfile): void {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN || this.connectRequestId) return;
-    const legacy = this.useLegacyControlUiProfile;
     const id = String(this.nextRequestNumber++);
     this.connectRequestId = id;
     try {
@@ -377,26 +477,7 @@ export class OpenClawGatewayAdapter {
           type: "req",
           id,
           method: "connect",
-          params: {
-            minProtocol: CONNECT_PROTOCOL,
-            maxProtocol: CONNECT_PROTOCOL,
-            client: {
-              id: legacy ? CONNECT_CLIENT_ID_LEGACY : CONNECT_CLIENT_ID_BACKEND,
-              version: "dev",
-              platform: legacy ? CONNECT_CLIENT_PLATFORM_LEGACY : CONNECT_CLIENT_PLATFORM_BACKEND,
-              mode: legacy ? CONNECT_CLIENT_MODE_LEGACY : CONNECT_CLIENT_MODE_BACKEND,
-            },
-            role: "operator",
-            scopes: [
-              "operator.admin",
-              "operator.read",
-              "operator.write",
-              "operator.approvals",
-              "operator.pairing",
-            ],
-            caps: CONNECT_CAPABILITIES,
-            auth: { token },
-          },
+          params: profile.connectParams,
         })
       );
     } catch (err) {
@@ -411,28 +492,22 @@ export class OpenClawGatewayAdapter {
     }
   }
 
-  private isOperatorScopeMissingError(error: unknown): boolean {
-    if (!(error instanceof ControlPlaneGatewayError)) return false;
-    if (error.code.trim().toUpperCase() !== "INVALID_REQUEST") return false;
-    const message = error.message.trim().toLowerCase();
-    return (
-      message.includes("missing scope: operator.read") ||
-      message.includes("missing scope: operator.write") ||
-      message.includes("missing scope: operator.admin")
-    );
-  }
-
   private async switchToLegacyControlUiProfile(): Promise<void> {
     if (this.legacyProfileSwitchPromise) {
       await this.legacyProfileSwitchPromise;
       return;
     }
-    if (this.useLegacyControlUiProfile) return;
+    if (this.connectProfileId === "legacy-control-ui") return;
     this.legacyProfileSwitchPromise = (async () => {
-      this.useLegacyControlUiProfile = true;
-      await this.stop();
-      this.stopping = false;
-      await this.start();
+      this.connectProfileId = "legacy-control-ui";
+      this.preserveConnectProfileOnStop = true;
+      try {
+        await this.stop();
+        this.stopping = false;
+        await this.start();
+      } finally {
+        this.preserveConnectProfileOnStop = false;
+      }
     })();
     try {
       await this.legacyProfileSwitchPromise;
@@ -444,6 +519,9 @@ export class OpenClawGatewayAdapter {
   private isTransientProfileSwitchError(error: unknown): boolean {
     if (error instanceof ControlPlaneGatewayError) {
       return error.code.trim().toUpperCase() === "GATEWAY_UNAVAILABLE";
+    }
+    if (error instanceof ControlPlaneGatewayConnectError) {
+      return !error.rejectedByGateway;
     }
     if (!(error instanceof Error)) return false;
     const message = error.message.trim().toLowerCase();

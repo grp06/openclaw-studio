@@ -37,19 +37,55 @@ const normalizeLocalGatewayDefaults = (value: unknown): StudioGatewaySettings | 
   return { url, token };
 };
 
-const formatGatewayError = (error: unknown): string => {
-  if (error instanceof Error) {
-    const message = error.message.trim();
-    const normalized = message.toLowerCase();
-    if (
-      normalized.includes("control ui requires device identity") ||
-      normalized.includes("secure context")
-    ) {
-      return "OpenClaw rejected this connection because its control-ui compatibility mode needs HTTPS or localhost device identity. Use wss:// via Tailscale Serve, or tunnel the gateway to ws://localhost from the Studio host.";
-    }
-    return message;
+type GatewayStartFailure = {
+  code?: unknown;
+  profileId?: unknown;
+  message?: unknown;
+  details?: unknown;
+} | null;
+
+const CONTROL_UI_COMPATIBILITY_GUIDANCE =
+  "OpenClaw rejected this connection because its control-ui compatibility mode needs HTTPS or localhost device identity. Use wss:// via Tailscale Serve, or tunnel the gateway to ws://localhost from the Studio host.";
+
+const readGatewayStartFailureProfileId = (value: GatewayStartFailure): string =>
+  value && typeof value.profileId === "string" ? value.profileId.trim().toLowerCase() : "";
+
+const readGatewayStartFailureMessage = (value: GatewayStartFailure): string =>
+  value && typeof value.message === "string" ? value.message.trim() : "";
+
+const shouldShowControlUiCompatibilityGuidance = (
+  message: string,
+  startFailure?: GatewayStartFailure
+): boolean => {
+  if (readGatewayStartFailureProfileId(startFailure ?? null) !== "legacy-control-ui") {
+    return false;
   }
-  return "Unknown gateway error.";
+  const normalized = message.trim().toLowerCase();
+  return (
+    normalized.includes("control ui requires device identity") ||
+    normalized.includes("secure context")
+  );
+};
+
+const formatGatewayMessage = (message: string, startFailure?: GatewayStartFailure): string => {
+  const trimmed = message.trim() || readGatewayStartFailureMessage(startFailure ?? null);
+  if (!trimmed) {
+    return "Unknown gateway error.";
+  }
+  if (shouldShowControlUiCompatibilityGuidance(trimmed, startFailure)) {
+    return CONTROL_UI_COMPATIBILITY_GUIDANCE;
+  }
+  return trimmed;
+};
+
+const formatGatewayError = (error: unknown, startFailure?: GatewayStartFailure): string => {
+  if (error instanceof Error) {
+    return formatGatewayMessage(error.message, startFailure);
+  }
+  if (typeof error === "string") {
+    return formatGatewayMessage(error, startFailure);
+  }
+  return formatGatewayMessage("", startFailure);
 };
 
 type RuntimeSummaryEnvelope = {
@@ -58,6 +94,7 @@ type RuntimeSummaryEnvelope = {
     reason?: unknown;
   } | null;
   error?: unknown;
+  startFailure?: GatewayStartFailure;
 };
 
 const mapRuntimeStatusToGatewayStatus = (value: unknown): GatewayStatus => {
@@ -72,6 +109,7 @@ const mapRuntimeStatusToGatewayStatus = (value: unknown): GatewayStatus => {
 type TestConnectionResponse = {
   ok?: unknown;
   error?: unknown;
+  startFailure?: GatewayStartFailure;
 };
 
 type StudioSettingsCoordinatorLike = {
@@ -175,14 +213,16 @@ export const useStudioGatewaySettings = (
     const nextStatus = mapRuntimeStatusToGatewayStatus(summary?.summary?.status);
     const nextReason = readString(summary?.summary?.reason);
     const nextError = readString(summary?.error);
+    const nextStartFailure = summary?.startFailure ?? null;
     setStatus(nextStatus);
     setStatusReason(nextReason || null);
     if (nextStatus === "error") {
-      setConnectionError(nextReason || nextError || "Gateway connection failed.");
+      const message = nextError || nextReason || "Gateway connection failed.";
+      setConnectionError(formatGatewayMessage(message, nextStartFailure));
       return;
     }
     if (nextStatus === "disconnected" && nextError) {
-      setConnectionError(nextError);
+      setConnectionError(formatGatewayMessage(nextError, nextStartFailure));
       return;
     }
     setConnectionError(null);
@@ -364,9 +404,10 @@ export const useStudioGatewaySettings = (
         }),
       });
       if (response.ok !== true) {
-        const message = readString(response.error)
-          ? formatGatewayError(new Error(readString(response.error)))
-          : "Connection test failed.";
+        const message = formatGatewayMessage(
+          readString(response.error) || "Connection test failed.",
+          response.startFailure ?? null
+        );
         setActionError(message);
         setTestResult({ kind: "error", message });
         return false;

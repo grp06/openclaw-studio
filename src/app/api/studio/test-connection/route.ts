@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { OpenClawGatewayAdapter } from "@/lib/controlplane/openclaw-adapter";
+import {
+  OpenClawGatewayAdapter,
+  serializeControlPlaneGatewayConnectFailure,
+} from "@/lib/controlplane/openclaw-adapter";
 import { loadStudioSettings } from "@/lib/studio/settings-store";
 
 export const runtime = "nodejs";
@@ -50,11 +53,13 @@ export async function POST(request: Request) {
       checkedAt: new Date().toISOString(),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Connection test failed.";
+    const startFailure = serializeControlPlaneGatewayConnectFailure(error);
+    const message = startFailure?.message ?? (error instanceof Error ? error.message : "Connection test failed.");
     return NextResponse.json(
       {
         ok: false,
         error: message,
+        ...(startFailure ? { startFailure } : {}),
         checkedAt: new Date().toISOString(),
       },
       { status: 200 }

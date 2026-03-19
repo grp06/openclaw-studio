@@ -179,6 +179,12 @@ describe("useStudioGatewaySettings", () => {
           ok: false,
           error:
             "Control-plane connect rejected: INVALID_REQUEST control ui requires device identity (use HTTPS or localhost secure context)",
+          startFailure: {
+            code: "INVALID_REQUEST",
+            profileId: "legacy-control-ui",
+            message:
+              "Control-plane connect rejected: INVALID_REQUEST control ui requires device identity (use HTTPS or localhost secure context)",
+          },
         };
       }
       throw new Error(`Unexpected fetchJson call: ${String(input)}`);
@@ -201,6 +207,111 @@ describe("useStudioGatewaySettings", () => {
     });
     expect(ctx.getValue().error).toBe(
       "OpenClaw rejected this connection because its control-ui compatibility mode needs HTTPS or localhost device identity. Use wss:// via Tailscale Serve, or tunnel the gateway to ws://localhost from the Studio host."
+    );
+
+    ctx.unmount();
+  });
+
+  it("shows the raw backend-local startup failure when the failure is not legacy control-ui", async () => {
+    mockedFetchJson.mockImplementation(async (input) => {
+      if (input === "/api/studio/test-connection") {
+        return {
+          ok: false,
+          error: "Control-plane gateway connection failed: connect ECONNREFUSED 127.0.0.1:18789",
+          startFailure: {
+            code: "CONNECT_FAILED",
+            profileId: "backend-local",
+            message:
+              "Control-plane gateway connection failed: connect ECONNREFUSED 127.0.0.1:18789",
+          },
+        };
+      }
+      throw new Error(`Unexpected fetchJson call: ${String(input)}`);
+    });
+
+    const ctx = renderHook();
+
+    await waitFor(() => {
+      expect(ctx.getValue().status).toBe("connected");
+    });
+
+    await act(async () => {
+      await ctx.getValue().testConnection();
+    });
+
+    expect(ctx.getValue().testResult).toEqual({
+      kind: "error",
+      message: "Control-plane gateway connection failed: connect ECONNREFUSED 127.0.0.1:18789",
+    });
+    expect(ctx.getValue().error).toBe(
+      "Control-plane gateway connection failed: connect ECONNREFUSED 127.0.0.1:18789"
+    );
+
+    ctx.unmount();
+  });
+
+  it("formats legacy control-ui startup failures from runtime summary with actionable guidance", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          enabled: true,
+          error:
+            "Control-plane connect rejected: INVALID_REQUEST control ui requires device identity (use HTTPS or localhost secure context)",
+          startFailure: {
+            code: "INVALID_REQUEST",
+            profileId: "legacy-control-ui",
+            message:
+              "Control-plane connect rejected: INVALID_REQUEST control ui requires device identity (use HTTPS or localhost secure context)",
+          },
+          summary: {
+            status: "error",
+            reason: "gateway_closed",
+          },
+        }),
+    });
+
+    const ctx = renderHook();
+
+    await waitFor(() => {
+      expect(ctx.getValue().status).toBe("error");
+    });
+    expect(ctx.getValue().error).toBe(
+      "OpenClaw rejected this connection because its control-ui compatibility mode needs HTTPS or localhost device identity. Use wss:// via Tailscale Serve, or tunnel the gateway to ws://localhost from the Studio host."
+    );
+
+    ctx.unmount();
+  });
+
+  it("keeps backend-local startup failures from runtime summary verbatim", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          enabled: true,
+          error: "Control-plane gateway connection failed: connect ECONNREFUSED 127.0.0.1:18789",
+          startFailure: {
+            code: "CONNECT_FAILED",
+            profileId: "backend-local",
+            message:
+              "Control-plane gateway connection failed: connect ECONNREFUSED 127.0.0.1:18789",
+          },
+          summary: {
+            status: "error",
+            reason: "gateway_closed",
+          },
+        }),
+    });
+
+    const ctx = renderHook();
+
+    await waitFor(() => {
+      expect(ctx.getValue().status).toBe("error");
+    });
+    expect(ctx.getValue().error).toBe(
+      "Control-plane gateway connection failed: connect ECONNREFUSED 127.0.0.1:18789"
     );
 
     ctx.unmount();

@@ -3,6 +3,7 @@ import {
   isStudioDomainApiModeEnabled,
   type ControlPlaneRuntime,
 } from "@/lib/controlplane/runtime";
+import { serializeControlPlaneGatewayConnectFailure } from "@/lib/controlplane/openclaw-adapter";
 import {
   classifyRuntimeInitError,
   type RuntimeInitFailure,
@@ -11,7 +12,14 @@ import {
 type DomainRuntimeBootstrapResult =
   | { kind: "mode-disabled" }
   | { kind: "runtime-init-failed"; failure: RuntimeInitFailure }
-  | { kind: "start-failed"; message: string; runtime: ControlPlaneRuntime }
+  | {
+      kind: "start-failed";
+      message: string;
+      startFailure:
+        | ReturnType<typeof serializeControlPlaneGatewayConnectFailure>
+        | null;
+      runtime: ControlPlaneRuntime;
+    }
   | { kind: "ready"; runtime: ControlPlaneRuntime };
 
 const resolveErrorMessage = (error: unknown, fallback: string): string =>
@@ -36,7 +44,8 @@ export async function bootstrapDomainRuntime(): Promise<DomainRuntimeBootstrapRe
     await runtime.ensureStarted();
     return { kind: "ready", runtime };
   } catch (error) {
-    const message = resolveErrorMessage(error, "controlplane_start_failed");
-    return { kind: "start-failed", message, runtime };
+    const startFailure = serializeControlPlaneGatewayConnectFailure(error);
+    const message = startFailure?.message ?? resolveErrorMessage(error, "controlplane_start_failed");
+    return { kind: "start-failed", message, startFailure, runtime };
   }
 }
