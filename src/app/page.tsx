@@ -220,6 +220,7 @@ const AgentStudioPage = () => {
     gatewayUrl,
     draftGatewayUrl,
     token,
+    allowSelfSignedCerts,
     localGatewayDefaults,
     localGatewayDefaultsHasToken,
     hasStoredToken,
@@ -237,6 +238,7 @@ const AgentStudioPage = () => {
     useLocalGatewayDefaults,
     setGatewayUrl,
     setToken,
+    setAllowSelfSignedCerts,
     applyRuntimeStatusEvent,
   } = useStudioGatewaySettings(settingsCoordinator);
   const gatewayStatus: GatewayStatus = status;
@@ -1424,6 +1426,7 @@ const AgentStudioPage = () => {
               savedGatewayUrl={gatewayUrl}
               draftGatewayUrl={draftGatewayUrl}
               token={token}
+              allowSelfSignedCerts={allowSelfSignedCerts}
               localGatewayDefaults={localGatewayDefaults}
               localGatewayDefaultsHasToken={localGatewayDefaultsHasToken}
               hasStoredToken={hasStoredToken}
@@ -1438,6 +1441,7 @@ const AgentStudioPage = () => {
               disconnecting={gatewayDisconnecting}
               onGatewayUrlChange={setGatewayUrl}
               onTokenChange={setToken}
+              onAllowSelfSignedCertsChange={setAllowSelfSignedCerts}
               onUseLocalDefaults={useLocalGatewayDefaults}
               onSaveSettings={() => void saveSettings()}
               onTestConnection={() => void testConnection()}
@@ -1491,6 +1495,7 @@ const AgentStudioPage = () => {
                     savedGatewayUrl={gatewayUrl}
                     draftGatewayUrl={draftGatewayUrl}
                     token={token}
+                    allowSelfSignedCerts={allowSelfSignedCerts}
                     hasStoredToken={hasStoredToken}
                     localGatewayDefaultsHasToken={localGatewayDefaultsHasToken}
                     hasUnsavedChanges={hasUnsavedChanges}
@@ -1503,6 +1508,7 @@ const AgentStudioPage = () => {
                     disconnecting={gatewayDisconnecting}
                     onGatewayUrlChange={setGatewayUrl}
                     onTokenChange={setToken}
+                    onAllowSelfSignedCertsChange={setAllowSelfSignedCerts}
                     onSaveSettings={() => void saveSettings()}
                     onTestConnection={() => void testConnection()}
                     onDisconnect={() => void disconnect()}
