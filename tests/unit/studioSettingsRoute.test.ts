@@ -125,7 +125,7 @@ describe("studio settings route", () => {
     };
 
     expect(getResponse.status).toBe(200);
-    expect(body.settings?.gateway).toEqual({ url: "ws://example.test:1234", token: "" });
+    expect(body.settings?.gateway).toEqual({ url: "ws://example.test:1234", token: "", allowSelfSignedCerts: false });
     expect(body.gatewayMeta?.hasStoredToken).toBe(true);
 
     const settingsPath = path.join(tempDir, "openclaw-studio", "settings.json");
@@ -135,7 +135,7 @@ describe("studio settings route", () => {
       gateway?: { url?: string; token?: string } | null;
       gatewayAutoStart?: boolean;
     };
-    expect(parsed.gateway).toEqual({ url: "ws://example.test:1234", token: "t" });
+    expect(parsed.gateway).toEqual({ url: "ws://example.test:1234", token: "t", allowSelfSignedCerts: false });
     expect(parsed.gatewayAutoStart).toBe(true);
   });
 
@@ -169,7 +169,7 @@ describe("studio settings route", () => {
       gatewayMeta?: { hasStoredToken?: unknown };
     };
     expect(getResponse.status).toBe(200);
-    expect(body.settings?.gateway).toEqual({ url: "ws://new.example:18789", token: "" });
+    expect(body.settings?.gateway).toEqual({ url: "ws://new.example:18789", token: "", allowSelfSignedCerts: false });
     expect(body.gatewayMeta?.hasStoredToken).toBe(true);
 
     const persisted = JSON.parse(
@@ -178,6 +178,7 @@ describe("studio settings route", () => {
     expect(persisted.gateway).toEqual({
       url: "ws://new.example:18789",
       token: "secret-token",
+      allowSelfSignedCerts: false,
     });
     expect(persisted.gatewayAutoStart).toBe(true);
   });

@@ -150,9 +150,11 @@ export const ConnectionPanel = ({
       </div>
       
       {allowSelfSignedCerts && (
-        <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-          <span className="text-sm">⚠️</span>
-          <span>Self-signed certificates are enabled. Do not use in production.</span>
+        <div className="ui-alert-danger rounded-md px-3 py-2 text-xs">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm">⚠️</span>
+            <span>Self-signed certificates are enabled. Do not use in production.</span>
+          </div>
         </div>
       )}
       
