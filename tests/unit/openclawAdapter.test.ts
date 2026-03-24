@@ -528,4 +528,45 @@ describe("OpenClawGatewayAdapter", () => {
 
     await adapter.stop();
   });
+
+
+  it("sends correct minProtocol and maxProtocol in connect request", async () => {
+    upstream = new WebSocketServer({ port: 0 });
+    const address = upstream.address();
+    if (!address || typeof address === "string") {
+      throw new Error("expected upstream server to provide a numeric port");
+    }
+    const upstreamUrl = `ws://127.0.0.1:${address.port}`;
+    let observedMinProtocol: unknown;
+    let observedMaxProtocol: unknown;
+
+    upstream.on("connection", (ws) => {
+      ws.send(JSON.stringify({ type: "event", event: "connect.challenge", payload: {} }));
+      ws.on("message", (raw) => {
+        const parsed = JSON.parse(String(raw ?? ""));
+        if (parsed?.method === "connect") {
+          observedMinProtocol = parsed.params?.minProtocol;
+          observedMaxProtocol = parsed.params?.maxProtocol;
+          ws.send(
+            JSON.stringify({
+              type: "res",
+              id: parsed.id,
+              ok: true,
+              payload: { type: "hello-ok", protocol: 3 },
+            })
+          );
+        }
+      });
+    });
+
+    const adapter = new OpenClawGatewayAdapter({
+      loadSettings: () => ({ url: upstreamUrl, token: "tkn" }),
+    });
+
+    await adapter.start();
+    expect(observedMinProtocol).toBe(3);
+    expect(observedMaxProtocol).toBe(3);
+    await adapter.stop();
+  });
+
 });
