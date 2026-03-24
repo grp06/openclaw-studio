@@ -54,7 +54,7 @@ async function main() {
   const handle = app.getRequestHandler();
 
   const accessGate = createAccessGate({
-    token: process.env.STUDIO_ACCESS_TOKEN,
+    token: "" // Disabled: process.env.STUDIO_ACCESS_TOKEN,
   });
 
   await app.prepare();
