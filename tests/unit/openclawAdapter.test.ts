@@ -537,16 +537,14 @@ describe("OpenClawGatewayAdapter", () => {
       throw new Error("expected upstream server to provide a numeric port");
     }
     const upstreamUrl = `ws://127.0.0.1:${address.port}`;
-    let observedMinProtocol: unknown;
-    let observedMaxProtocol: unknown;
+    let observedParams: Record<string, unknown> | null = null;
 
     upstream.on("connection", (ws) => {
       ws.send(JSON.stringify({ type: "event", event: "connect.challenge", payload: {} }));
       ws.on("message", (raw) => {
         const parsed = JSON.parse(String(raw ?? ""));
         if (parsed?.method === "connect") {
-          observedMinProtocol = parsed.params?.minProtocol;
-          observedMaxProtocol = parsed.params?.maxProtocol;
+          observedParams = parsed.params ?? null;
           ws.send(
             JSON.stringify({
               type: "res",
@@ -564,8 +562,14 @@ describe("OpenClawGatewayAdapter", () => {
     });
 
     await adapter.start();
-    expect(observedMinProtocol).toBe(3);
-    expect(observedMaxProtocol).toBe(3);
+    
+    // Verify protocol fields are present and correctly set
+    expect(observedParams?.minProtocol).toBe(3);
+    expect(observedParams?.maxProtocol).toBe(3);
+    
+    // Verify protocol is not a nested object (prevents regression of malformed params)
+    expect(observedParams?.protocol).toBeUndefined();
+    
     await adapter.stop();
   });
 
