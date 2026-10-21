@@ -73,18 +73,58 @@ export const buildAllowedModelKeys = (snapshot: GatewayModelPolicySnapshot | nul
   return allowedList;
 };
 
+// Only curate known text IDs advertised by the connected gateway. Never synthesize
+// routes or replace its metadata, explicit allowlist, or saved session selection.
+const minimaxTextId = (entry: GatewayModelChoice): string | null => {
+  const provider = entry.provider.toLowerCase();
+  const id = entry.id.toLowerCase();
+  if (["minimax", "minimax-cn", "minimax-portal", "minimax-portal-cn"].includes(provider)) {
+    return id;
+  }
+  if (provider === "openrouter" && id.startsWith("minimax/")) {
+    return id.slice("minimax/".length);
+  }
+  if (provider === "opencode" && id.startsWith("minimax-")) return id;
+  return null;
+};
+
+const currentMinimaxRank = (entry: GatewayModelChoice): number | null => {
+  const id = minimaxTextId(entry);
+  if (id === "minimax-m3") return 1;
+  const flashId = entry.provider.toLowerCase() === "openrouter"
+    ? "minimax-m3.1-flash:free"
+    : entry.provider.toLowerCase() === "opencode"
+      ? "minimax-m3.1-flash-free"
+      : "minimax-m3.1-flash";
+  return id === flashId ? 0 : null;
+};
+
+const curateUnconfiguredCatalog = (catalog: GatewayModelChoice[]) => {
+  const filtered = catalog.filter((entry) => {
+    const id = minimaxTextId(entry);
+    return id === null || !/^minimax-(?:text-01|m1(?:-40k|-80k)?|m2(?:\.1|\.5|\.7)?(?:-highspeed|-lightning)?)(?::free|-free)?$/.test(id);
+  });
+  const current = filtered
+    .filter((entry) => currentMinimaxRank(entry) !== null)
+    .sort((a, b) => currentMinimaxRank(a)! - currentMinimaxRank(b)!);
+  let index = 0;
+  return filtered.map((entry) => currentMinimaxRank(entry) === null ? entry : current[index++]);
+};
+
 export const buildGatewayModelChoices = (
   catalog: GatewayModelChoice[],
   snapshot: GatewayModelPolicySnapshot | null
 ) => {
   const allowedKeys = buildAllowedModelKeys(snapshot);
-  if (allowedKeys.length === 0) return catalog;
+  if (allowedKeys.length === 0) return curateUnconfiguredCatalog(catalog);
   const filtered = catalog.filter((entry) => allowedKeys.includes(`${entry.provider}/${entry.id}`));
   const filteredKeys = new Set(filtered.map((entry) => `${entry.provider}/${entry.id}`));
   const extras: GatewayModelChoice[] = [];
   for (const key of allowedKeys) {
     if (filteredKeys.has(key)) continue;
-    const [provider, id] = key.split("/");
+    const separator = key.indexOf("/");
+    const provider = key.slice(0, separator);
+    const id = key.slice(separator + 1);
     if (!provider || !id) continue;
     extras.push({ provider, id, name: key });
   }
