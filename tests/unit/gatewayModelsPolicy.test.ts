@@ -92,6 +92,49 @@ describe("gateway model policy helpers", () => {
     ]);
   });
 
+  it.each(["minimax", "minimax-cn", "minimax-portal", "minimax-portal-cn"])(
+    "prefers advertised Flash then M3 for %s while preserving unrelated choices and metadata",
+    (provider) => {
+      const model = (id: string) => ({ provider, id, name: id, contextWindow: 123456 });
+      const other = { provider: "custom", id: "MiniMax-M2.7", name: "Custom route" };
+      const m3 = model("MiniMax-M3");
+      const flash = model("MiniMax-M3.1-Flash");
+      const media = model("MiniMax-VL-01");
+      const custom = model("my-custom-model");
+      const catalog = [model("MiniMax-M2.7"), m3, other, flash, media, custom];
+      expect(buildGatewayModelChoices(catalog, null)).toEqual([flash, other, m3, media, custom]);
+      expect(catalog[0].id).toBe("MiniMax-M2.7");
+      expect(buildGatewayModelChoices([m3], null)).toEqual([m3]);
+      expect(buildGatewayModelChoices([model("MiniMax-M2.5-highspeed")], null)).toEqual([]);
+    }
+  );
+
+  it.each([
+    ["openrouter", "minimax/minimax-m3.1-flash:free", "minimax/minimax-m3", "minimax/minimax-m2.7"],
+    ["opencode", "minimax-m3.1-flash-free", "minimax-m3", "minimax-m2.5-free"],
+  ])("preserves advertised gateway IDs and metadata for %s", (provider, flashId, m3Id, legacyId) => {
+    const model = (id: string) => ({ provider, id, name: id });
+    const flash = model(flashId);
+    const m3 = model(m3Id);
+    expect(buildGatewayModelChoices([m3, flash], null)).toEqual([flash, m3]);
+    const snapshot = { config: { agents: { defaults: { models: { [`${provider}/${legacyId}`]: {} } } } } };
+    expect(buildGatewayModelChoices([], snapshot)).toEqual([
+      { provider, id: legacyId, name: `${provider}/${legacyId}` },
+    ]);
+  });
+
+  it("keeps explicit legacy defaults, fallbacks, aliases and custom routes", () => {
+    const snapshot = { config: { agents: { defaults: {
+      model: { primary: "legacy", fallbacks: ["minimax/MiniMax-M2.5"] },
+      models: {
+        "minimax/MiniMax-M2.7": { alias: "legacy" },
+        "openrouter/private/custom-model": {},
+      },
+    } } } };
+    expect(buildGatewayModelChoices([], snapshot).map((entry) => `${entry.provider}/${entry.id}`))
+      .toEqual(["minimax/MiniMax-M2.7", "minimax/MiniMax-M2.5", "openrouter/private/custom-model"]);
+  });
+
   it("returns the catalog unchanged when no config allowlist is present", () => {
     const catalog = [
       {
